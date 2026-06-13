@@ -1,6 +1,4 @@
 
--- CIS Sovereign Election System - Supabase/PostgreSQL Schema
-
 -- 1. Classes Table
 CREATE TABLE IF NOT EXISTS classes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,28 +28,27 @@ CREATE TABLE IF NOT EXISTS candidates (
 
 -- 4. Voter Tokens Table
 CREATE TABLE IF NOT EXISTS voter_tokens (
-    id TEXT PRIMARY KEY, 
+    id TEXT PRIMARY KEY,
     class_id UUID REFERENCES classes(id) ON DELETE CASCADE NOT NULL,
     status TEXT CHECK (status IN ('unused', 'used')) NOT NULL DEFAULT 'unused',
     used_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 5. System Configuration Table
+-- 5. System Config Table
 CREATE TABLE IF NOT EXISTS system_config (
     id TEXT PRIMARY KEY,
-    is_open BOOLEAN NOT NULL DEFAULT false,
-    opened_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    is_open BOOLEAN DEFAULT false,
+    opened_at TIMESTAMP WITH TIME ZONE
 );
 
--- Insert initial record if not exists
+-- Seed Initial Config (Fixes the 400 Error)
 INSERT INTO system_config (id, is_open) 
 VALUES ('election_status', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Enable Realtime for all tables safely
-DO $$
+-- Enable Realtime
+DO $$ 
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'classes') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE classes;
@@ -70,26 +67,16 @@ BEGIN
     END IF;
 END $$;
 
--- Security Rules (Row Level Security)
+-- Security Rules
 ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voter_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
 
--- Allow full access for prototype (SELECT, INSERT, UPDATE, DELETE)
--- In production, these should be restricted to authenticated admin only
-DROP POLICY IF EXISTS "Full Access" ON classes;
-CREATE POLICY "Full Access" ON classes FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Full Access" ON positions;
-CREATE POLICY "Full Access" ON positions FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Full Access" ON candidates;
-CREATE POLICY "Full Access" ON candidates FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Full Access" ON voter_tokens;
-CREATE POLICY "Full Access" ON voter_tokens FOR ALL USING (true);
-
-DROP POLICY IF EXISTS "Full Access" ON system_config;
-CREATE POLICY "Full Access" ON system_config FOR ALL USING (true);
+-- Full Public Access for Prototype
+CREATE POLICY "Full Access Classes" ON classes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access Positions" ON positions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access Candidates" ON candidates FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access Tokens" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access Config" ON system_config FOR ALL USING (true) WITH CHECK (true);
