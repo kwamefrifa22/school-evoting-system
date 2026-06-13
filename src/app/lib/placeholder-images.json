@@ -1,0 +1,23 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "candidate-1",
+      "description": "Student candidate for prefect role",
+      "imageUrl": "https://picsum.photos/seed/cand1/400/400",
+      "imageHint": "student portrait"
+    },
+    {
+      "id": "candidate-2",
+      "description": "Student candidate for sports prefect",
+      "imageUrl": "https://picsum.photos/seed/cand2/400/400",
+      "imageHint": "active student"
+    },
+    {
+      "id": "school-logo",
+      "description": "CIS School Branding",
+      "imageUrl": "https://picsum.photos/seed/cislogo/200/200",
+      "imageHint": "school logo"
+    }
+  ]
+}
