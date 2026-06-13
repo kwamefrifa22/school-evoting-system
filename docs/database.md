@@ -38,6 +38,7 @@ Unique one-time identifiers for student authentication.
 Global settings for the election.
 - `id` (text): "election_status".
 - `is_open` (boolean): Controls whether polls are accessible.
+- `opened_at` (timestamp with time zone): The time the election was opened.
 
 ## Real-time Integration
 All tables have **Supabase Realtime** enabled. The frontend uses PostgreSQL change listeners to update dashboards instantly as votes are cast.

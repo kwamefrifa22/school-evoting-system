@@ -61,7 +61,6 @@ export default function AdminPage() {
   const handleEmailAuth = async () => {
     if (emailInput.toLowerCase() !== ADMIN_EMAIL) {
       setAuthError('Unauthorized admin email.');
-      console.error("ERROR: Identity verification failed. Input does not match admin records.");
       return;
     }
 
@@ -72,7 +71,7 @@ export default function AdminPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: emailInput.toLowerCase(),
         options: {
-          shouldCreateUser: false, // Security: Admin must already exist in Supabase Users list
+          shouldCreateUser: false, 
         }
       });
 
@@ -83,11 +82,11 @@ export default function AdminPage() {
         throw error;
       }
 
-      console.log("SUCCESS: Identity verified. Real OTP code requested via Supabase for:", ADMIN_EMAIL);
+      console.log("SUCCESS: OTP code requested via Supabase for:", ADMIN_EMAIL);
       setAuthStep('code');
       toast({
         title: "Verification Sent",
-        description: "A 6-digit code has been sent to your email. Do NOT click the link in the email, just use the code.",
+        description: "A 6-digit code has been sent to your email. Enter it below.",
       });
     } catch (err: any) {
       console.error("Supabase Auth Error:", err.message);
@@ -112,13 +111,12 @@ export default function AdminPage() {
       if (error) throw error;
 
       if (data.session) {
-        console.log("SUCCESS: Verification code accepted. Session established.");
         setIsAuthenticated(true);
       } else {
         throw new Error("Verification failed to establish session.");
       }
     } catch (err: any) {
-      console.error("ERROR: Invalid verification code or expired session.");
+      console.error("ERROR: Invalid verification code.");
       setAuthError('Invalid or expired verification code.');
     } finally {
       setIsLoading(false);
@@ -171,7 +169,7 @@ export default function AdminPage() {
     const interval = setInterval(() => {
       const start = new Date(config.opened_at!).getTime();
       const now = new Date().getTime();
-      const diff = now - start;
+      const diff = Math.max(0, now - start);
       const h = Math.floor(diff / 3600000);
       const m = Math.floor((diff % 3600000) / 60000);
       const s = Math.floor((diff % 60000) / 1000);
@@ -195,16 +193,24 @@ export default function AdminPage() {
   const toggleElection = async () => {
     const newStatus = !config?.is_open;
     const openedAt = newStatus ? new Date().toISOString() : null;
-    const { error } = await supabase.from('system_config').update({ 
+    
+    // Use upsert to ensure the row is created if missing, or updated if present
+    const { error } = await supabase.from('system_config').upsert({ 
+      id: 'election_status',
       is_open: newStatus, 
       opened_at: openedAt 
-    }).eq('id', 'election_status');
+    }, { onConflict: 'id' });
     
     if (error) {
       console.error("Toggle error:", error);
       toast({ title: "Operation Failed", description: error.message, variant: "destructive" });
+    } else {
+      toast({ 
+        title: newStatus ? "Election Opened" : "Polls Closed", 
+        description: newStatus ? "Students can now cast their votes." : "Voting has been disabled." 
+      });
+      fetchData();
     }
-    fetchData();
   };
 
   const handleAddPosition = async () => {
@@ -404,12 +410,10 @@ export default function AdminPage() {
             <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center</h1>
           </div>
           <div className="flex items-center gap-6">
-            {config?.is_open && (
-              <div className="flex items-center gap-2 px-4 py-1.5 bg-accent/10 text-accent rounded-full border border-accent/20">
-                <Timer className="w-4 h-4" />
-                <span className="font-mono font-bold text-sm">{elapsedTime}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2 px-4 py-1.5 bg-accent/10 text-accent rounded-full border border-accent/20">
+              <Timer className="w-4 h-4" />
+              <span className="font-mono font-bold text-sm">{elapsedTime}</span>
+            </div>
             <Badge variant={config?.is_open ? "default" : "secondary"} className={config?.is_open ? "bg-emerald-500" : ""}>{config?.is_open ? "POLLS OPEN" : "POLLS CLOSED"}</Badge>
             <Button size="sm" variant={config?.is_open ? "destructive" : "default"} onClick={toggleElection}>
               {config?.is_open ? <Lock className="w-4 h-4 mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
