@@ -9,10 +9,17 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Trophy, Users, CheckCircle, BarChart3, TrendingUp } from 'lucide-react';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { Bar, BarChart, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart';
+import { Bar, BarChart, XAxis, YAxis, Cell } from 'recharts';
 import Image from 'next/image';
 import { Class, Candidate, Position } from '@/lib/types';
+
+const chartConfig = {
+  votes: {
+    label: "Votes",
+    color: "hsl(var(--primary))",
+  },
+} satisfies ChartConfig;
 
 export default function ResultsPage() {
   const supabase = createClient();
@@ -154,20 +161,18 @@ export default function ResultsPage() {
                     <CardTitle className="text-lg mb-8 flex items-center gap-2">
                       <BarChart3 className="w-5 h-5 text-primary" /> Vote Distribution
                     </CardTitle>
-                    <div className="h-[300px] w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 40 }}>
-                          <XAxis type="number" hide />
-                          <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} width={100} style={{ fontSize: '12px', fontWeight: 'bold' }} />
-                          <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                          <Bar dataKey="votes" radius={[0, 4, 4, 0]} barSize={24}>
-                            {chartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={index === 0 ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground) / 0.4)'} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <ChartContainer config={chartConfig} className="h-[300px] w-full">
+                      <BarChart data={chartData} layout="vertical" margin={{ left: 40, right: 40 }}>
+                        <XAxis type="number" hide />
+                        <YAxis type="category" dataKey="name" axisLine={false} tickLine={false} width={100} style={{ fontSize: '12px', fontWeight: 'bold' }} />
+                        <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                        <Bar dataKey="votes" radius={[0, 4, 4, 0]} barSize={24}>
+                          {chartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={index === 0 ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground) / 0.4)'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ChartContainer>
                   </Card>
                 </div>
               </section>
