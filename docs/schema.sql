@@ -1,4 +1,5 @@
--- CIS Sovereign Election System - Idempotent Supabase/PostgreSQL Schema
+
+-- CIS Sovereign Election System - Supabase/PostgreSQL Schema
 
 -- 1. Classes Table
 CREATE TABLE IF NOT EXISTS classes (
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 
 -- 4. Voter Tokens Table
 CREATE TABLE IF NOT EXISTS voter_tokens (
-    id TEXT PRIMARY KEY, -- 6-character unique code
+    id TEXT PRIMARY KEY, -- Unique code (e.g. G6A-123456)
     class_id UUID REFERENCES classes(id) ON DELETE CASCADE NOT NULL,
     status TEXT CHECK (status IN ('unused', 'used')) NOT NULL DEFAULT 'unused',
     used_at TIMESTAMP WITH TIME ZONE,
@@ -43,48 +44,32 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Insert default config if not exists
+-- Initialize config if it doesn't exist
 INSERT INTO system_config (id, is_open) 
 VALUES ('election_status', false) 
 ON CONFLICT (id) DO NOTHING;
 
--- Enable Realtime (Idempotent check)
-DO $$
+-- Enable Realtime (Ignore errors if already enabled)
+DO $$ 
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables 
-        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'classes'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'classes') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE classes;
     END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables 
-        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'positions'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'positions') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE positions;
     END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables 
-        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'candidates'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'candidates') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE candidates;
     END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables 
-        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'voter_tokens'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'voter_tokens') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE voter_tokens;
     END IF;
-
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables 
-        WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'system_config'
-    ) THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'system_config') THEN
         ALTER PUBLICATION supabase_realtime ADD TABLE system_config;
     END IF;
+EXCEPTION WHEN OTHERS THEN
+    -- Publication might not exist or other issue, log it
+    RAISE NOTICE 'Could not modify publication: %', SQLERRM;
 END $$;
 
 -- Security Rules (Row Level Security)
@@ -94,18 +79,16 @@ ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voter_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
 
--- Allow full public access for the prototype (In production, you'd restrict INSERT/UPDATE to authenticated admins)
-DROP POLICY IF EXISTS "Public full access" ON classes;
-CREATE POLICY "Public full access" ON classes FOR ALL USING (true) WITH CHECK (true);
+-- DROP existing policies to avoid duplicates
+DROP POLICY IF EXISTS "Full Access" ON classes;
+DROP POLICY IF EXISTS "Full Access" ON positions;
+DROP POLICY IF EXISTS "Full Access" ON candidates;
+DROP POLICY IF EXISTS "Full Access" ON voter_tokens;
+DROP POLICY IF EXISTS "Full Access" ON system_config;
 
-DROP POLICY IF EXISTS "Public full access" ON positions;
-CREATE POLICY "Public full access" ON positions FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public full access" ON candidates;
-CREATE POLICY "Public full access" ON candidates FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public full access" ON voter_tokens;
-CREATE POLICY "Public full access" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Public full access" ON system_config;
-CREATE POLICY "Public full access" ON system_config FOR ALL USING (true) WITH CHECK (true);
+-- Create ALL access policies for prototype (Allow SELECT, INSERT, UPDATE, DELETE)
+CREATE POLICY "Full Access" ON classes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access" ON positions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access" ON candidates FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full Access" ON system_config FOR ALL USING (true) WITH CHECK (true);

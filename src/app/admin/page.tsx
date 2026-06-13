@@ -35,25 +35,35 @@ export default function AdminPage() {
   const [newClass, setNewClass] = useState({ name: '', population: 0 });
 
   const fetchData = async () => {
-    const { data: cls } = await supabase.from('classes').select('*').order('name');
-    const { data: pos } = await supabase.from('positions').select('*').order('order_index');
-    const { data: cand } = await supabase.from('candidates').select('*');
-    const { data: tokens } = await supabase.from('voter_tokens').select('*');
-    const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').single();
-    const { data: recent } = await supabase.from('voter_tokens').select('*').eq('status', 'used').order('used_at', { ascending: false }).limit(10);
+    try {
+      const { data: cls } = await supabase.from('classes').select('*').order('name');
+      const { data: pos } = await supabase.from('positions').select('*').order('order_index');
+      const { data: cand } = await supabase.from('candidates').select('*');
+      const { data: tokens } = await supabase.from('voter_tokens').select('*');
+      const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').maybeSingle();
+      const { data: recent } = await supabase.from('voter_tokens').select('*').eq('status', 'used').order('used_at', { ascending: false }).limit(10);
 
-    if (cls) setClasses(cls);
-    if (pos) setPositions(pos);
-    if (cand) setCandidates(cand);
-    if (tokens) setAllTokens(tokens);
-    if (cfg) setConfig(cfg);
-    if (recent) setRecentVotes(recent);
+      if (cls) setClasses(cls);
+      if (pos) setPositions(pos);
+      if (cand) setCandidates(cand);
+      if (tokens) setAllTokens(tokens);
+      if (cfg) {
+        setConfig(cfg);
+      } else {
+        // Fallback or initialization if row missing
+        const { data: newCfg } = await supabase.from('system_config').insert({ id: 'election_status', is_open: false }).select().single();
+        if (newCfg) setConfig(newCfg);
+      }
+      if (recent) setRecentVotes(recent);
+    } catch (err) {
+      console.error("Fetch error:", err);
+    }
   };
 
   useEffect(() => {
     fetchData();
 
-    const channels = supabase.channel('admin_all')
+    const channel = supabase.channel('admin_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, fetchData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, fetchData)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, fetchData)
@@ -62,7 +72,7 @@ export default function AdminPage() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channels);
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -81,15 +91,21 @@ export default function AdminPage() {
   const toggleElection = async () => {
     const newStatus = !config?.is_open;
     await supabase.from('system_config').update({ is_open: newStatus }).eq('id', 'election_status');
+    fetchData();
   };
 
   const handleAddPosition = async () => {
     if (!newPosition) return;
-    await supabase.from('positions').insert({
+    const { error } = await supabase.from('positions').insert({
       name: newPosition,
       order_index: positions.length
     });
+    if (error) {
+      alert("Error adding position. Ensure SQL policies are set.");
+      console.error(error);
+    }
     setNewPosition('');
+    fetchData();
   };
 
   const handleAddCandidate = async () => {
@@ -101,16 +117,22 @@ export default function AdminPage() {
       votes: 0
     });
     setNewCandidate({ name: '', positionId: '', photoUrl: '' });
+    fetchData();
   };
 
   const handleAddClass = async () => {
     if (!newClass.name || newClass.population <= 0) return;
-    await supabase.from('classes').insert({
+    const { error } = await supabase.from('classes').insert({
       name: newClass.name,
       population: newClass.population,
       votes_cast: 0
     });
+    if (error) {
+      alert("Error adding class. Ensure SQL policies are set.");
+      console.error(error);
+    }
     setNewClass({ name: '', population: 0 });
+    fetchData();
   };
 
   const generateTokens = async (cls: Class) => {
@@ -137,6 +159,26 @@ export default function AdminPage() {
     }
 
     await supabase.from('voter_tokens').insert(tokensToInsert);
+    fetchData();
+  };
+
+  const deleteItem = async (table: string, id: string) => {
+    await supabase.from(table).delete().eq('id', id);
+    fetchData();
+  };
+
+  const exportTokens = (cls: Class) => {
+    const tokens = allTokens.filter(t => t.class_id === cls.id);
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + "Token,Status\n" 
+      + tokens.map(e => `${e.id},${e.status}`).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `tokens_${cls.name.replace(/\s+/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const runAiAnalysis = async () => {
@@ -171,24 +213,6 @@ export default function AdminPage() {
     } finally {
       setIsAnalyzing(false);
     }
-  };
-
-  const exportTokens = (cls: Class) => {
-    const tokens = allTokens.filter(t => t.class_id === cls.id);
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + "Token,Status\n" 
-      + tokens.map(e => `${e.id},${e.status}`).join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `tokens_${cls.name.replace(/\s+/g, '_')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const deleteItem = async (table: string, id: string) => {
-    await supabase.from(table).delete().eq('id', id);
   };
 
   return (
@@ -227,7 +251,7 @@ export default function AdminPage() {
         <header className="h-20 border-b bg-white flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             <SidebarTrigger className="md:hidden" />
-            <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center (Supabase)</h1>
+            <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center</h1>
           </div>
           <div className="flex items-center gap-4">
             <Badge variant={config?.is_open ? "default" : "secondary"} className={config?.is_open ? "bg-emerald-500 animate-pulse" : ""}>
@@ -304,7 +328,7 @@ export default function AdminPage() {
                   <CardContent className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <Input placeholder="Class Name (e.g., Grade A1)" value={newClass.name} onChange={e => setNewClass({...newClass, name: e.target.value})} />
-                      <Input type="number" placeholder="Class Size" value={newClass.population} onChange={e => setNewClass({...newClass, population: parseInt(e.target.value)})} />
+                      <Input type="number" placeholder="Class Size" value={newClass.population} onChange={e => setNewClass({...newClass, population: parseInt(e.target.value) || 0})} />
                       <Button onClick={handleAddClass}>Add Class</Button>
                     </div>
                     
@@ -392,8 +416,8 @@ export default function AdminPage() {
                             <TableCell className="font-bold">{cls.name}</TableCell>
                             <TableCell>
                               <div className="flex items-center gap-3">
-                                <Progress value={((cls.votes_cast || 0) / cls.population) * 100} className="h-2 flex-1" />
-                                <span className="text-xs font-bold">{Math.round(((cls.votes_cast || 0) / cls.population) * 100)}%</span>
+                                <Progress value={cls.population > 0 ? ((cls.votes_cast || 0) / cls.population) * 100 : 0} className="h-2 flex-1" />
+                                <span className="text-xs font-bold">{cls.population > 0 ? Math.round(((cls.votes_cast || 0) / cls.population) * 100) : 0}%</span>
                               </div>
                             </TableCell>
                           </TableRow>
