@@ -30,4 +30,5 @@ export interface VoterToken {
 export interface SystemConfig {
   id: 'election_status';
   is_open: boolean;
+  opened_at?: string;
 }
