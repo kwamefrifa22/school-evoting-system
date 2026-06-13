@@ -87,7 +87,7 @@ export default function AdminPage() {
       setAuthStep('code');
       toast({
         title: "Verification Sent",
-        description: "A secure code has been sent to your email.",
+        description: "A 6-digit code has been sent to your email. Do NOT click the link in the email, just use the code.",
       });
     } catch (err: any) {
       console.error("Supabase Auth Error:", err.message);
