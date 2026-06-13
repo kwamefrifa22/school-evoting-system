@@ -23,7 +23,7 @@ export default function AdminPage() {
   const [emailInput, setEmailInput] = useState('');
   const [codeInput, setCodeInput] = useState('');
   const [authError, setAuthError] = useState('');
-  const ADMIN_EMAIL = 'amoakoafrifa741@gmail.com';
+  const ADMIN_EMAIL = 'stevekobbi20@gmail.com';
   const VERIFICATION_CODE = '202611'; // Mock static code for prototype
 
   // Data State
@@ -50,19 +50,23 @@ export default function AdminPage() {
 
   const handleEmailAuth = () => {
     if (emailInput.toLowerCase() === ADMIN_EMAIL) {
+      console.log("SUCCESS: Identity verified. Verification code 'sent' to:", ADMIN_EMAIL);
       setAuthStep('code');
       setAuthError('');
     } else {
+      console.error("ERROR: Identity verification failed. Input does not match admin records.");
       setAuthError('Incorrect admin email identification.');
     }
   };
 
   const handleCodeAuth = () => {
     if (codeInput === VERIFICATION_CODE) {
+      console.log("SUCCESS: Verification code accepted. Access granted to Sovereign Control.");
       setIsAuthenticated(true);
       localStorage.setItem('cis_admin_auth', 'true');
       setAuthError('');
     } else {
+      console.error("ERROR: Invalid verification code entered.");
       setAuthError('Invalid verification code.');
     }
   };
@@ -242,7 +246,7 @@ export default function AdminPage() {
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">Identify Administrator</label>
                   <div className="bg-muted p-4 rounded-xl border border-dashed border-muted-foreground/30 text-center">
-                    <p className="text-sm font-bold text-secondary tracking-widest">amoa...............741@gmail.com</p>
+                    <p className="text-sm font-bold text-secondary tracking-widest">st...........20@gmail.com</p>
                   </div>
                   <div className="relative">
                     <Mail className="absolute left-3 top-3.5 w-5 h-5 text-muted-foreground" />
