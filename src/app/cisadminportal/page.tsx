@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
@@ -8,23 +9,26 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users, MonitorPlay, Timer, Image as ImageIcon, Key, Mail, ShieldAlert } from 'lucide-react';
+import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users, MonitorPlay, Timer, Image as ImageIcon, Key, Mail, ShieldAlert, Loader2 } from 'lucide-react';
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarInset, SidebarTrigger, SidebarSeparator } from '@/components/ui/sidebar';
 import { Class, Candidate, Position, VoterToken, SystemConfig } from '@/lib/types';
 import { realtimeElectionInsightGeneration, RealtimeElectionInsightGenerationOutput } from '@/ai/flows/realtime-election-insight-generation';
 import { Progress } from '@/components/ui/progress';
+import { useToast } from '@/hooks/use-toast';
 
 export default function AdminPage() {
   const supabase = createClient();
+  const { toast } = useToast();
   
   // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authStep, setAuthStep] = useState<'email' | 'code'>('email');
   const [emailInput, setEmailInput] = useState('');
   const [codeInput, setCodeInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [authError, setAuthError] = useState('');
+  
   const ADMIN_EMAIL = 'stevekobbi20@gmail.com';
-  const VERIFICATION_CODE = '202611'; // Mock static code for prototype
 
   // Data State
   const [classes, setClasses] = useState<Class[]>([]);
@@ -43,31 +47,76 @@ export default function AdminPage() {
   const [newCandidate, setNewCandidate] = useState({ name: '', positionId: '', fileName: '' });
   const [newClass, setNewClass] = useState({ name: '', population: 0 });
 
+  // Check existing session
   useEffect(() => {
-    const savedAuth = localStorage.getItem('cis_admin_auth');
-    if (savedAuth === 'true') setIsAuthenticated(true);
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email === ADMIN_EMAIL) {
+        setIsAuthenticated(true);
+      }
+    };
+    checkUser();
   }, []);
 
-  const handleEmailAuth = () => {
-    if (emailInput.toLowerCase() === ADMIN_EMAIL) {
-      console.log("SUCCESS: Identity verified. Verification code 'sent' to:", ADMIN_EMAIL);
-      setAuthStep('code');
-      setAuthError('');
-    } else {
+  const handleEmailAuth = async () => {
+    if (emailInput.toLowerCase() !== ADMIN_EMAIL) {
+      setAuthError('Unauthorized admin email.');
       console.error("ERROR: Identity verification failed. Input does not match admin records.");
-      setAuthError('Incorrect admin email identification.');
+      return;
+    }
+
+    setIsLoading(true);
+    setAuthError('');
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: emailInput.toLowerCase(),
+        options: {
+          shouldCreateUser: false, // Ensure only existing users or pre-invited can login
+        }
+      });
+
+      if (error) throw error;
+
+      console.log("SUCCESS: Identity verified. Real OTP code requested via Supabase for:", ADMIN_EMAIL);
+      setAuthStep('code');
+      toast({
+        title: "Verification Sent",
+        description: "A secure code has been sent to your email.",
+      });
+    } catch (err: any) {
+      console.error("Supabase Auth Error:", err.message);
+      setAuthError(err.message || 'Failed to send verification code.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleCodeAuth = () => {
-    if (codeInput === VERIFICATION_CODE) {
-      console.log("SUCCESS: Verification code accepted. Access granted to Sovereign Control.");
-      setIsAuthenticated(true);
-      localStorage.setItem('cis_admin_auth', 'true');
-      setAuthError('');
-    } else {
-      console.error("ERROR: Invalid verification code entered.");
-      setAuthError('Invalid verification code.');
+  const handleCodeAuth = async () => {
+    if (!codeInput) return;
+    setIsLoading(true);
+    setAuthError('');
+
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: emailInput.toLowerCase(),
+        token: codeInput,
+        type: 'email',
+      });
+
+      if (error) throw error;
+
+      if (data.session) {
+        console.log("SUCCESS: Verification code accepted. Session established.");
+        setIsAuthenticated(true);
+      } else {
+        throw new Error("Verification failed to establish session.");
+      }
+    } catch (err: any) {
+      console.error("ERROR: Invalid verification code or expired session.");
+      setAuthError('Invalid or expired verification code.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -238,7 +287,7 @@ export default function AdminPage() {
               <ShieldAlert className="w-8 h-8 text-accent" />
             </div>
             <CardTitle className="text-2xl font-black text-secondary uppercase tracking-tight">Admin Gateway</CardTitle>
-            <CardDescription className="font-medium">Identity verification required to access Sovereign Control</CardDescription>
+            <CardDescription className="font-medium">Secure OTP verification required for Sovereign access</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6 pt-6">
             {authStep === 'email' ? (
@@ -246,46 +295,62 @@ export default function AdminPage() {
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">Identify Administrator</label>
                   <div className="bg-muted p-4 rounded-xl border border-dashed border-muted-foreground/30 text-center">
-                    <p className="text-sm font-bold text-secondary tracking-widest">st...........20@gmail.com</p>
+                    <p className="text-sm font-bold text-secondary tracking-widest">s...........20@gmail.com</p>
                   </div>
                   <div className="relative">
                     <Mail className="absolute left-3 top-3.5 w-5 h-5 text-muted-foreground" />
                     <Input 
-                      placeholder="Enter full email to continue" 
+                      placeholder="Confirm full admin email" 
                       className="pl-10 h-12" 
+                      disabled={isLoading}
                       value={emailInput} 
                       onChange={e => setEmailInput(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleEmailAuth()}
                     />
                   </div>
                 </div>
-                {authError && <p className="text-destructive text-xs font-bold text-center">{authError}</p>}
-                <Button className="w-full h-12 bg-primary hover:bg-primary/90 font-bold" onClick={handleEmailAuth}>Verify Email</Button>
+                {authError && <p className="text-destructive text-xs font-bold text-center bg-destructive/10 p-2 rounded">{authError}</p>}
+                <Button 
+                  className="w-full h-12 bg-primary hover:bg-primary/90 font-bold" 
+                  onClick={handleEmailAuth}
+                  disabled={isLoading || !emailInput}
+                >
+                  {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Request Verification Code"}
+                </Button>
               </div>
             ) : (
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">Verification Code</label>
-                  <p className="text-[10px] text-muted-foreground">A 6-digit code was sent to the admin mailbox</p>
+                  <p className="text-[10px] text-muted-foreground">A 6-digit code has been sent to {emailInput}</p>
                   <div className="relative">
                     <Key className="absolute left-3 top-3.5 w-5 h-5 text-muted-foreground" />
                     <Input 
                       placeholder="000000" 
                       className="pl-10 h-12 font-mono tracking-widest text-lg" 
+                      disabled={isLoading}
                       value={codeInput} 
                       onChange={e => setCodeInput(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleCodeAuth()}
                     />
                   </div>
                 </div>
-                {authError && <p className="text-destructive text-xs font-bold text-center">{authError}</p>}
-                <Button className="w-full h-12 bg-primary hover:bg-primary/90 font-bold" onClick={handleCodeAuth}>Enter Control Center</Button>
-                <Button variant="ghost" className="w-full text-xs" onClick={() => setAuthStep('email')}>Back to Identification</Button>
+                {authError && <p className="text-destructive text-xs font-bold text-center bg-destructive/10 p-2 rounded">{authError}</p>}
+                <Button 
+                  className="w-full h-12 bg-primary hover:bg-primary/90 font-bold" 
+                  onClick={handleCodeAuth}
+                  disabled={isLoading || !codeInput}
+                >
+                  {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Verify & Enter Control Center"}
+                </Button>
+                <Button variant="ghost" className="w-full text-xs" onClick={() => { setAuthStep('email'); setAuthError(''); }} disabled={isLoading}>
+                  Change Email
+                </Button>
               </div>
             )}
           </CardContent>
           <div className="bg-muted/50 p-4 text-center border-t">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Sovereign Security Protocol V2.0</p>
+            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Sovereign Security Protocol V3.0</p>
           </div>
         </Card>
       </div>
