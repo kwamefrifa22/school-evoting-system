@@ -1,109 +1,83 @@
 
--- Enable Realtime for the database
+-- 1. Create Tables
+CREATE TABLE IF NOT EXISTS classes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  population int NOT NULL,
+  votes_cast int DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS positions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  order_index int NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  position_id uuid REFERENCES positions(id) ON DELETE CASCADE,
+  full_name text NOT NULL,
+  photo_url text NOT NULL,
+  votes int DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS voter_tokens (
+  id text PRIMARY KEY,
+  class_id uuid REFERENCES classes(id) ON DELETE CASCADE,
+  status text NOT NULL CHECK (status IN ('unused', 'used')),
+  used_at timestamp with time zone
+);
+
+CREATE TABLE IF NOT EXISTS system_config (
+  id text PRIMARY KEY,
+  is_open boolean DEFAULT false,
+  opened_at timestamp with time zone
+);
+
+-- 2. Add column if it was missed in a previous run
 DO $$ 
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-    CREATE PUBLICATION supabase_realtime;
+BEGIN 
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='system_config' AND column_name='opened_at') THEN
+    ALTER TABLE system_config ADD COLUMN opened_at timestamp with time zone;
   END IF;
 END $$;
 
--- 1. Classes Table
-CREATE TABLE IF NOT EXISTS public.classes (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    population int DEFAULT 0,
-    votes_cast int DEFAULT 0,
-    created_at timestamptz DEFAULT now()
-);
-
--- 2. Positions Table
-CREATE TABLE IF NOT EXISTS public.positions (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    order_index int DEFAULT 0,
-    created_at timestamptz DEFAULT now()
-);
-
--- 3. Candidates Table
-CREATE TABLE IF NOT EXISTS public.candidates (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    position_id uuid REFERENCES public.positions(id) ON DELETE CASCADE,
-    full_name text NOT NULL,
-    photo_url text,
-    votes int DEFAULT 0,
-    created_at timestamptz DEFAULT now()
-);
-
--- 4. Voter Tokens Table
-CREATE TABLE IF NOT EXISTS public.voter_tokens (
-    id text PRIMARY KEY,
-    class_id uuid REFERENCES public.classes(id) ON DELETE CASCADE,
-    status text DEFAULT 'unused',
-    used_at timestamptz,
-    created_at timestamptz DEFAULT now()
-);
-
--- 5. System Config Table
-CREATE TABLE IF NOT EXISTS public.system_config (
-    id text PRIMARY KEY,
-    is_open boolean DEFAULT false,
-    opened_at timestamptz
-);
-
--- Seed System Config if it doesn't exist
-INSERT INTO public.system_config (id, is_open) 
-VALUES ('election_status', false)
+-- 3. Seed initial config
+INSERT INTO system_config (id, is_open, opened_at)
+VALUES ('election_status', false, NULL)
 ON CONFLICT (id) DO NOTHING;
 
--- Enable RLS
-ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.positions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.candidates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.voter_tokens ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
-
--- Idempotent Policy Creation
-DO $$ 
-BEGIN
-    -- Classes Policies
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Full Access Classes') THEN
-        CREATE POLICY "Full Access Classes" ON public.classes FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    
-    -- Positions Policies
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Full Access Positions') THEN
-        CREATE POLICY "Full Access Positions" ON public.positions FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    
-    -- Candidates Policies
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Full Access Candidates') THEN
-        CREATE POLICY "Full Access Candidates" ON public.candidates FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    
-    -- Tokens Policies
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Full Access Tokens') THEN
-        CREATE POLICY "Full Access Tokens" ON public.voter_tokens FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-    
-    -- Config Policies
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Full Access Config') THEN
-        CREATE POLICY "Full Access Config" ON public.system_config FOR ALL USING (true) WITH CHECK (true);
-    END IF;
-END $$;
-
--- Enable Realtime for specific tables
+-- 4. Enable Realtime
+-- Note: This might fail if the publication already has the tables. We wrap it in a safe way.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'classes') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.classes;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'candidates') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.candidates;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'positions') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.positions;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'system_config') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE public.system_config;
-    END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'system_config') THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE classes, candidates, positions, system_config, voter_tokens;
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  -- Handle case where some tables might already be in publication
+  NULL;
 END $$;
+
+-- 5. RLS Policies
+ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE voter_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing if they exist to avoid "already exists" errors
+DO $$ 
+BEGIN
+    DROP POLICY IF EXISTS "Allow All" ON classes;
+    DROP POLICY IF EXISTS "Allow All" ON positions;
+    DROP POLICY IF EXISTS "Allow All" ON candidates;
+    DROP POLICY IF EXISTS "Allow All" ON voter_tokens;
+    DROP POLICY IF EXISTS "Allow All" ON system_config;
+END $$;
+
+CREATE POLICY "Allow All" ON classes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All" ON positions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All" ON candidates FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow All" ON system_config FOR ALL USING (true) WITH CHECK (true);
