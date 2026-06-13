@@ -1,8 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/utils/supabase/client';
 import { Position, Candidate, VoterToken, SystemConfig } from '@/lib/types';
 import { ElectionHeader } from '@/components/shared/ElectionHeader';
@@ -10,7 +9,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, ChevronRight, AlertTriangle, Key, Lock } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { CheckCircle2, ChevronRight, ChevronLeft, AlertTriangle, Key, Lock, ArrowRight } from 'lucide-react';
 import Image from 'next/image';
 
 export default function VotePage() {
@@ -21,17 +21,22 @@ export default function VotePage() {
   const [config, setConfig] = useState<SystemConfig | null>(null);
 
   const [step, setStep] = useState<'token' | 'voting' | 'confirm' | 'success'>('token');
+  const [currentPosIndex, setCurrentPosIndex] = useState(0);
   const [tokenInput, setTokenInput] = useState('');
   const [currentToken, setCurrentToken] = useState<VoterToken | null>(null);
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const sortedPositions = useMemo(() => {
+    return [...positions].sort((a, b) => a.order_index - b.order_index);
+  }, [positions]);
+
   useEffect(() => {
     const fetchData = async () => {
       const { data: pos } = await supabase.from('positions').select('*').order('order_index');
       const { data: cand } = await supabase.from('candidates').select('*');
-      const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').single();
+      const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').maybeSingle();
       
       if (pos) setPositions(pos);
       if (cand) setCandidates(cand);
@@ -39,7 +44,6 @@ export default function VotePage() {
     };
     fetchData();
 
-    // Real-time election status listener
     const channel = supabase.channel('status_check')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_config' }, payload => {
         setConfig(payload.new as SystemConfig);
@@ -57,7 +61,7 @@ export default function VotePage() {
       .from('voter_tokens')
       .select('*')
       .eq('id', tokenInput.toUpperCase())
-      .single();
+      .maybeSingle();
     
     if (data) {
       if (data.status === 'used') {
@@ -73,9 +77,16 @@ export default function VotePage() {
 
   const handleCandidateSelect = (posId: string, candId: string) => {
     setSelections(prev => ({ ...prev, [posId]: candId }));
+    
+    // Auto-advance logic
+    if (currentPosIndex < sortedPositions.length - 1) {
+      setTimeout(() => {
+        setCurrentPosIndex(prev => prev + 1);
+      }, 300); // Small delay for visual feedback
+    }
   };
 
-  const isVotingComplete = positions.every(pos => selections[pos.id]);
+  const isVotingComplete = sortedPositions.every(pos => selections[pos.id]);
 
   const handleSubmit = async () => {
     if (!currentToken) return;
@@ -133,7 +144,7 @@ export default function VotePage() {
           </div>
           <h2 className="text-3xl font-headline font-black text-secondary uppercase">Vote Recorded!</h2>
           <p className="text-muted-foreground text-lg">Thank you for participating in the CIS Prefectorial Elections.</p>
-          <Button className="w-full" onClick={() => window.location.reload()}>Next Student</Button>
+          <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={() => window.location.reload()}>Next Student</Button>
         </div>
       </div>
     );
@@ -143,9 +154,9 @@ export default function VotePage() {
     <div className="min-h-screen bg-[#F5F5F5]">
       <ElectionHeader />
       
-      <main className="max-w-4xl mx-auto px-4 py-12">
+      <main className="max-w-5xl mx-auto px-4 py-8 md:py-12">
         {step === 'token' && (
-          <div className="max-w-md mx-auto space-y-6">
+          <div className="max-w-md mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="text-center space-y-2">
               <h2 className="text-2xl font-headline font-bold text-secondary">Voter Authentication</h2>
               <p className="text-muted-foreground">Enter your unique student voter token</p>
@@ -166,7 +177,7 @@ export default function VotePage() {
                   </div>
                 </div>
                 {error && <p className="text-destructive text-sm font-bold text-center">{error}</p>}
-                <Button className="w-full h-14 text-lg font-bold" onClick={validateToken}>Authenticate</Button>
+                <Button className="w-full h-14 text-lg font-bold rounded-xl" onClick={validateToken}>Authenticate</Button>
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-amber-800 text-xs">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
                   <p>Each token is valid for a single voting session. Tokens are distributed by class teachers.</p>
@@ -176,88 +187,132 @@ export default function VotePage() {
           </div>
         )}
 
-        {step === 'voting' && (
-          <div className="space-y-12">
-            <div className="flex items-center justify-between sticky top-[80px] bg-[#F5F5F5]/90 backdrop-blur p-4 z-40 rounded-xl">
-              <div>
-                <h2 className="text-2xl font-headline font-bold text-secondary">Digital Ballot</h2>
-                <p className="text-muted-foreground">Token: <span className="font-bold text-primary">{currentToken?.id}</span></p>
+        {step === 'voting' && sortedPositions.length > 0 && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Voting Progress Header */}
+            <div className="bg-white p-6 rounded-3xl shadow-md border border-gray-100 sticky top-[80px] z-40">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+                <div>
+                  <h2 className="text-2xl font-headline font-black text-secondary uppercase tracking-tight">
+                    {sortedPositions[currentPosIndex].name}
+                  </h2>
+                  <p className="text-sm text-muted-foreground font-medium">Position {currentPosIndex + 1} of {sortedPositions.length}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="hidden md:block text-right">
+                    <p className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Election Progress</p>
+                    <p className="text-sm font-bold text-primary">{Math.round(((currentPosIndex + 1) / sortedPositions.length) * 100)}% Complete</p>
+                  </div>
+                  <Badge className="bg-primary/10 text-primary border-primary/20 h-10 px-4 rounded-xl text-xs font-bold">
+                    {Object.keys(selections).length} / {sortedPositions.length} VOTED
+                  </Badge>
+                </div>
               </div>
-              <Badge className="bg-primary text-white h-8 px-4 text-sm">
-                {Object.keys(selections).length} / {positions.length} Selected
-              </Badge>
+              <Progress value={((currentPosIndex + 1) / sortedPositions.length) * 100} className="h-2" />
             </div>
 
-            {positions.sort((a,b) => a.order_index - b.order_index).map(pos => (
-              <section key={pos.id} className="space-y-6">
-                <div className="flex items-center gap-4">
-                  <div className="h-px bg-border flex-1" />
-                  <h3 className="text-xl font-headline font-black text-primary uppercase tracking-tight">{pos.name}</h3>
-                  <div className="h-px bg-border flex-1" />
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {candidates.filter(c => c.position_id === pos.id).map(cand => (
-                    <Card 
-                      key={cand.id}
-                      className={`relative overflow-hidden cursor-pointer transition-all border-2 ${
-                        selections[pos.id] === cand.id 
-                        ? 'border-primary shadow-lg scale-[1.02]' 
-                        : 'border-transparent hover:border-muted'
-                      }`}
-                      onClick={() => handleCandidateSelect(pos.id, cand.id)}
-                    >
-                      <div className="aspect-square relative">
-                        <Image src={cand.photo_url} alt={cand.full_name} fill className="object-cover" />
-                        {selections[pos.id] === cand.id && (
-                          <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
-                            <div className="bg-primary text-white p-2 rounded-full shadow-xl">
-                              <CheckCircle2 className="w-8 h-8" />
-                            </div>
+            {/* Candidate Selection Area */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {candidates
+                .filter(c => c.position_id === sortedPositions[currentPosIndex].id)
+                .map(cand => (
+                  <Card 
+                    key={cand.id}
+                    className={`group relative overflow-hidden cursor-pointer transition-all duration-300 border-4 rounded-[2.5rem] ${
+                      selections[sortedPositions[currentPosIndex].id] === cand.id 
+                      ? 'border-primary bg-primary/5 shadow-2xl scale-[1.02]' 
+                      : 'border-transparent hover:border-gray-200 hover:shadow-xl bg-white'
+                    }`}
+                    onClick={() => handleCandidateSelect(sortedPositions[currentPosIndex].id, cand.id)}
+                  >
+                    <div className="aspect-square relative m-3 overflow-hidden rounded-[2rem]">
+                      <Image 
+                        src={cand.photo_url} 
+                        alt={cand.full_name} 
+                        fill 
+                        className="object-cover transition-transform duration-500 group-hover:scale-110" 
+                      />
+                      {selections[sortedPositions[currentPosIndex].id] === cand.id && (
+                        <div className="absolute inset-0 bg-primary/40 backdrop-blur-[2px] flex items-center justify-center animate-in fade-in duration-300">
+                          <div className="bg-white text-primary p-4 rounded-full shadow-2xl scale-110">
+                            <CheckCircle2 className="w-12 h-12" />
                           </div>
-                        )}
-                      </div>
-                      <CardContent className="p-4 bg-white text-center">
-                        <h4 className="font-bold text-secondary text-lg">{cand.full_name}</h4>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </section>
-            ))}
+                        </div>
+                      )}
+                    </div>
+                    <CardContent className="p-6 text-center">
+                      <h4 className={`font-black text-xl uppercase tracking-tight transition-colors ${
+                        selections[sortedPositions[currentPosIndex].id] === cand.id ? 'text-primary' : 'text-secondary'
+                      }`}>
+                        {cand.full_name}
+                      </h4>
+                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mt-1">Select Candidate</p>
+                    </CardContent>
+                  </Card>
+                ))}
+            </div>
 
-            <div className="flex justify-end pt-8">
+            {/* Navigation Controls */}
+            <div className="flex items-center justify-between pt-8">
               <Button 
-                size="lg" 
-                className="bg-accent hover:bg-accent/90 text-secondary font-black text-lg px-12 h-16 rounded-2xl shadow-xl disabled:opacity-50"
-                disabled={!isVotingComplete}
-                onClick={() => setStep('confirm')}
+                variant="outline" 
+                size="lg"
+                className="h-16 px-8 rounded-2xl border-2 font-bold gap-2"
+                onClick={() => setCurrentPosIndex(prev => Math.max(0, prev - 1))}
+                disabled={currentPosIndex === 0}
               >
-                Review Selections <ChevronRight className="ml-2 w-6 h-6" />
+                <ChevronLeft className="w-5 h-5" /> Previous Role
               </Button>
+
+              <div className="flex gap-4">
+                {currentPosIndex < sortedPositions.length - 1 ? (
+                  <Button 
+                    size="lg"
+                    className="h-16 px-10 rounded-2xl bg-secondary hover:bg-secondary/90 text-white font-bold gap-2"
+                    onClick={() => setCurrentPosIndex(prev => prev + 1)}
+                  >
+                    Next Role <ChevronRight className="w-5 h-5" />
+                  </Button>
+                ) : (
+                  <Button 
+                    size="lg"
+                    className="h-16 px-12 rounded-2xl bg-accent hover:bg-accent/90 text-secondary font-black text-lg shadow-xl gap-2 disabled:opacity-50"
+                    disabled={!isVotingComplete}
+                    onClick={() => setStep('confirm')}
+                  >
+                    Final Review <ArrowRight className="w-6 h-6" />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         )}
 
         {step === 'confirm' && (
-          <div className="max-w-2xl mx-auto space-y-8">
+          <div className="max-w-2xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
             <header className="text-center space-y-2">
-              <h2 className="text-3xl font-headline font-black text-secondary uppercase">FINAL CONFIRMATION</h2>
-              <p className="text-muted-foreground">Please review your selections before casting your vote.</p>
+              <div className="w-16 h-16 bg-accent/20 text-accent rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8" />
+              </div>
+              <h2 className="text-3xl font-headline font-black text-secondary uppercase tracking-tight">Verify Your Ballot</h2>
+              <p className="text-muted-foreground">Please ensure all selections are correct. This action cannot be undone.</p>
             </header>
 
             <div className="space-y-4">
-              {positions.map(pos => {
+              {sortedPositions.map(pos => {
                 const candidate = candidates.find(c => c.id === selections[pos.id]);
                 return (
-                  <Card key={pos.id} className="border-none shadow-md overflow-hidden">
-                    <div className="flex items-center p-4 gap-6">
-                      <div className="w-16 h-16 rounded-xl overflow-hidden relative shrink-0">
+                  <Card key={pos.id} className="border-none shadow-lg overflow-hidden rounded-3xl bg-white hover:shadow-xl transition-shadow">
+                    <div className="flex items-center p-5 gap-6">
+                      <div className="w-20 h-20 rounded-2xl overflow-hidden relative shrink-0 border-2 border-gray-50 shadow-inner">
                         <Image src={candidate?.photo_url || ''} alt="" fill className="object-cover" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-xs font-bold text-primary uppercase tracking-widest">{pos.name}</p>
-                        <h4 className="text-xl font-bold text-secondary">{candidate?.full_name}</h4>
+                        <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-1">{pos.name}</p>
+                        <h4 className="text-xl font-black text-secondary uppercase tracking-tight">{candidate?.full_name}</h4>
+                      </div>
+                      <div className="bg-emerald-50 text-emerald-600 p-2 rounded-full">
+                        <CheckCircle2 className="w-6 h-6" />
                       </div>
                     </div>
                   </Card>
@@ -265,14 +320,27 @@ export default function VotePage() {
               })}
             </div>
 
-            <div className="flex gap-4 pt-8">
-              <Button variant="outline" className="flex-1 h-14 rounded-xl text-lg" onClick={() => setStep('voting')}>Back</Button>
+            <div className="flex flex-col sm:flex-row gap-4 pt-8">
               <Button 
-                className="flex-[2] h-14 rounded-xl text-lg bg-primary hover:bg-primary/90 shadow-xl"
+                variant="outline" 
+                className="flex-1 h-16 rounded-2xl text-lg font-bold border-2" 
+                onClick={() => setStep('voting')}
+              >
+                Go Back & Edit
+              </Button>
+              <Button 
+                className="flex-[2] h-16 rounded-2xl text-xl font-black bg-primary hover:bg-primary/90 shadow-2xl uppercase tracking-wider"
                 onClick={handleSubmit}
                 disabled={isSubmitting}
               >
-                {isSubmitting ? "Processing..." : "Confirm & Submit"}
+                {isSubmitting ? (
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 border-4 border-white/30 border-t-white rounded-full animate-spin" />
+                    Recording Vote...
+                  </div>
+                ) : (
+                  "Confirm & Submit Vote"
+                )}
               </Button>
             </div>
           </div>
