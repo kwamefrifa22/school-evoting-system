@@ -28,7 +28,7 @@ export default function AdminPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   
-  const ADMIN_EMAIL = 'stevekobbi20@gmail.com';
+  const ADMIN_EMAIL = 'amoakoafrifa741@gmail.com';
 
   // Data State
   const [classes, setClasses] = useState<Class[]>([]);
@@ -82,11 +82,11 @@ export default function AdminPage() {
         throw error;
       }
 
-      console.log("SUCCESS: OTP code requested via Supabase for:", ADMIN_EMAIL);
+      console.log("SUCCESS: OTP code requested for:", ADMIN_EMAIL);
       setAuthStep('code');
       toast({
         title: "Verification Sent",
-        description: "A 6-digit code has been sent to your email. Enter it below.",
+        description: "A 6-digit code has been sent to your email.",
       });
     } catch (err: any) {
       console.error("Supabase Auth Error:", err.message);
@@ -113,7 +113,7 @@ export default function AdminPage() {
       if (data.session) {
         setIsAuthenticated(true);
       } else {
-        throw new Error("Verification failed to establish session.");
+        throw new Error("Verification failed.");
       }
     } catch (err: any) {
       console.error("ERROR: Invalid verification code.");
@@ -194,7 +194,6 @@ export default function AdminPage() {
     const newStatus = !config?.is_open;
     const openedAt = newStatus ? new Date().toISOString() : null;
     
-    // Use upsert to ensure the row is created if missing, or updated if present
     const { error } = await supabase.from('system_config').upsert({ 
       id: 'election_status',
       is_open: newStatus, 
@@ -311,7 +310,7 @@ export default function AdminPage() {
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">Identify Administrator</label>
                   <div className="bg-muted p-4 rounded-xl border border-dashed border-muted-foreground/30 text-center">
-                    <p className="text-sm font-bold text-secondary tracking-widest">s...........20@gmail.com</p>
+                    <p className="text-sm font-bold text-secondary tracking-widest">a...........1@gmail.com</p>
                   </div>
                   <div className="relative">
                     <Mail className="absolute left-3 top-3.5 w-5 h-5 text-muted-foreground" />
@@ -338,7 +337,7 @@ export default function AdminPage() {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-xs font-black uppercase text-muted-foreground tracking-widest">Verification Code</label>
-                  <p className="text-[10px] text-muted-foreground">A 6-digit code has been sent to {emailInput}</p>
+                  <p className="text-[10px] text-muted-foreground">A 6-digit code has been sent to your email.</p>
                   <div className="relative">
                     <Key className="absolute left-3 top-3.5 w-5 h-5 text-muted-foreground" />
                     <Input 
