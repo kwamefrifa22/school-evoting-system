@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users, MonitorPlay, Timer, Image as ImageIcon, Key, Mail, ShieldAlert, Loader2 } from 'lucide-react';
+import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users, MonitorPlay, Timer, Image as ImageIcon, Key, Mail, ShieldAlert, Loader2, Upload } from 'lucide-react';
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarInset, SidebarTrigger, SidebarSeparator } from '@/components/ui/sidebar';
 import { Class, Candidate, Position, VoterToken, SystemConfig } from '@/lib/types';
 import { realtimeElectionInsightGeneration, RealtimeElectionInsightGenerationOutput } from '@/ai/flows/realtime-election-insight-generation';
@@ -44,7 +44,9 @@ export default function AdminPage() {
   const [elapsedTime, setElapsedTime] = useState<string>("00:00:00");
 
   const [newPosition, setNewPosition] = useState('');
-  const [newCandidate, setNewCandidate] = useState({ name: '', positionId: '', fileName: '' });
+  const [newCandidate, setNewCandidate] = useState({ name: '', positionId: '' });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [newClass, setNewClass] = useState({ name: '', population: 0 });
 
   // Check existing session
@@ -220,19 +222,47 @@ export default function AdminPage() {
   };
 
   const handleAddCandidate = async () => {
-    if (!newCandidate.name || !newCandidate.positionId) return;
-    const photoUrl = newCandidate.fileName 
-      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/images/${newCandidate.fileName}`
-      : `https://picsum.photos/seed/${Math.random()}/400/400`;
+    if (!newCandidate.name || !newCandidate.positionId || !selectedFile) {
+      toast({ title: "Incomplete Form", description: "Please provide a name, position, and photo.", variant: "destructive" });
+      return;
+    }
 
-    await supabase.from('candidates').insert({
-      full_name: newCandidate.name,
-      position_id: newCandidate.positionId,
-      photo_url: photoUrl,
-      votes: 0
-    });
-    setNewCandidate({ name: '', positionId: '', fileName: '' });
-    fetchData();
+    setIsUploading(true);
+    try {
+      // 1. Upload the image
+      const fileExt = selectedFile.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage
+        .from('images')
+        .upload(fileName, selectedFile);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get Public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('images')
+        .getPublicUrl(fileName);
+
+      // 3. Insert Candidate
+      const { error: insertError } = await supabase.from('candidates').insert({
+        full_name: newCandidate.name,
+        position_id: newCandidate.positionId,
+        photo_url: publicUrl,
+        votes: 0
+      });
+
+      if (insertError) throw insertError;
+
+      setNewCandidate({ name: '', positionId: '' });
+      setSelectedFile(null);
+      fetchData();
+      toast({ title: "Success", description: "Candidate registered successfully." });
+    } catch (err: any) {
+      console.error("Registration error:", err);
+      toast({ title: "Registration Failed", description: err.message, variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleAddClass = async () => {
@@ -449,25 +479,55 @@ export default function AdminPage() {
                 <Card className="border-none shadow-md">
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2"><UserPlus className="w-5 h-5" /> 2. Register Candidates</CardTitle>
-                    <CardDescription>Assign candidates to positions.</CardDescription>
+                    <CardDescription>Upload photo and assign to position.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <Input placeholder="Candidate Full Name" value={newCandidate.name} onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} />
-                    <select className="w-full h-10 px-3 rounded-md border" value={newCandidate.positionId} onChange={e => setNewCandidate({...newCandidate, positionId: e.target.value})}>
+                    <Input 
+                      placeholder="Candidate Full Name" 
+                      value={newCandidate.name} 
+                      onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} 
+                    />
+                    <select 
+                      className="w-full h-10 px-3 rounded-md border text-sm" 
+                      value={newCandidate.positionId} 
+                      onChange={e => setNewCandidate({...newCandidate, positionId: e.target.value})}
+                    >
                       <option value="">Select Position</option>
                       {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                    <div className="relative">
-                      <ImageIcon className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
-                      <Input placeholder="Filename in Supabase 'images' bucket" className="pl-10" value={newCandidate.fileName} onChange={e => setNewCandidate({...newCandidate, fileName: e.target.value})} />
+                    
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Candidate Photo</label>
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1">
+                          <Input 
+                            type="file" 
+                            accept="image/*" 
+                            className="cursor-pointer"
+                            onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+                          />
+                        </div>
+                        {selectedFile && <div className="text-[10px] font-bold text-primary flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Ready</div>}
+                      </div>
                     </div>
-                    <Button className="w-full" onClick={handleAddCandidate}>Add Candidate</Button>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
+
+                    <Button 
+                      className="w-full h-12 font-bold" 
+                      onClick={handleAddCandidate}
+                      disabled={isUploading}
+                    >
+                      {isUploading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Upload className="w-4 h-4 mr-2" />}
+                      {isUploading ? "Uploading..." : "Register Candidate"}
+                    </Button>
+
+                    <div className="space-y-2 max-h-40 overflow-y-auto pt-4 border-t">
                       {candidates.map(c => (
                         <div key={c.id} className="flex justify-between items-center p-2 bg-muted rounded-md">
                           <div className="flex flex-col">
-                            <span className="font-bold">{c.full_name}</span>
-                            <span className="text-xs text-muted-foreground">{positions.find(p => p.id === c.position_id)?.name}</span>
+                            <span className="font-bold text-sm">{c.full_name}</span>
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">
+                              {positions.find(p => p.id === c.position_id)?.name}
+                            </span>
                           </div>
                           <Button variant="ghost" size="sm" onClick={() => deleteItem('candidates', c.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                         </div>
