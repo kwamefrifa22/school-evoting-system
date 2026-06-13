@@ -1,82 +1,111 @@
+-- CIS Sovereign Electoral System - Database Schema
+-- Run this in the Supabase SQL Editor
 
--- 1. Classes Table
-CREATE TABLE IF NOT EXISTS classes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    population INTEGER NOT NULL DEFAULT 0,
-    votes_cast INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+-- 1. Create Tables
+CREATE TABLE IF NOT EXISTS public.classes (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  population integer NOT NULL,
+  votes_cast integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- 2. Electoral Positions Table
-CREATE TABLE IF NOT EXISTS positions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    order_index INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+CREATE TABLE IF NOT EXISTS public.positions (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  order_index integer NOT NULL,
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- 3. Candidates Table
-CREATE TABLE IF NOT EXISTS candidates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    position_id UUID REFERENCES positions(id) ON DELETE CASCADE NOT NULL,
-    full_name TEXT NOT NULL,
-    photo_url TEXT NOT NULL,
-    votes INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+CREATE TABLE IF NOT EXISTS public.candidates (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  position_id uuid REFERENCES public.positions(id) ON DELETE CASCADE,
+  full_name text NOT NULL,
+  photo_url text NOT NULL,
+  votes integer DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- 4. Voter Tokens Table
-CREATE TABLE IF NOT EXISTS voter_tokens (
-    id TEXT PRIMARY KEY,
-    class_id UUID REFERENCES classes(id) ON DELETE CASCADE NOT NULL,
-    status TEXT CHECK (status IN ('unused', 'used')) NOT NULL DEFAULT 'unused',
-    used_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+CREATE TABLE IF NOT EXISTS public.voter_tokens (
+  id text PRIMARY KEY,
+  class_id uuid REFERENCES public.classes(id) ON DELETE CASCADE,
+  status text CHECK (status IN ('unused', 'used')) DEFAULT 'unused',
+  used_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now()
 );
 
--- 5. System Config Table
-CREATE TABLE IF NOT EXISTS system_config (
-    id TEXT PRIMARY KEY,
-    is_open BOOLEAN DEFAULT false,
-    opened_at TIMESTAMP WITH TIME ZONE
+CREATE TABLE IF NOT EXISTS public.system_config (
+  id text PRIMARY KEY,
+  is_open boolean DEFAULT false,
+  opened_at timestamp with time zone,
+  updated_at timestamp with time zone DEFAULT now()
 );
 
--- Seed Initial Config (Fixes the 400 Error)
-INSERT INTO system_config (id, is_open) 
+-- 2. Initialize Election Status (Crucial to prevent 400 errors on update)
+INSERT INTO public.system_config (id, is_open) 
 VALUES ('election_status', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Enable Realtime
+-- 3. Enable Row Level Security (RLS)
+ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.candidates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.voter_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
+
+-- 4. Create Policies (Drop first to avoid "already exists" errors)
 DO $$ 
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'classes') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE classes;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'positions') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE positions;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'candidates') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE candidates;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'voter_tokens') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE voter_tokens;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'system_config') THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE system_config;
-    END IF;
+    -- Classes
+    DROP POLICY IF EXISTS "Full Access Classes" ON public.classes;
+    CREATE POLICY "Full Access Classes" ON public.classes FOR ALL USING (true) WITH CHECK (true);
+
+    -- Positions
+    DROP POLICY IF EXISTS "Full Access Positions" ON public.positions;
+    CREATE POLICY "Full Access Positions" ON public.positions FOR ALL USING (true) WITH CHECK (true);
+
+    -- Candidates
+    DROP POLICY IF EXISTS "Full Access Candidates" ON public.candidates;
+    CREATE POLICY "Full Access Candidates" ON public.candidates FOR ALL USING (true) WITH CHECK (true);
+
+    -- Tokens
+    DROP POLICY IF EXISTS "Full Access Tokens" ON public.voter_tokens;
+    CREATE POLICY "Full Access Tokens" ON public.voter_tokens FOR ALL USING (true) WITH CHECK (true);
+
+    -- System Config
+    DROP POLICY IF EXISTS "Full Access Config" ON public.system_config;
+    CREATE POLICY "Full Access Config" ON public.system_config FOR ALL USING (true) WITH CHECK (true);
 END $$;
 
--- Security Rules
-ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE voter_tokens ENABLE ROW LEVEL SECURITY;
-ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
+-- 5. Enable Realtime
+-- This section is safer to run manually if it fails, but we try to handle it.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND tablename = 'classes'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.classes;
+  END IF;
 
--- Full Public Access for Prototype
-CREATE POLICY "Full Access Classes" ON classes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Full Access Positions" ON positions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Full Access Candidates" ON candidates FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Full Access Tokens" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Full Access Config" ON system_config FOR ALL USING (true) WITH CHECK (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND tablename = 'candidates'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.candidates;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND tablename = 'system_config'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.system_config;
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND tablename = 'voter_tokens'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.voter_tokens;
+  END IF;
+END $$;
