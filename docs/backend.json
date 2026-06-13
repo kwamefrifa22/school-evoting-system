@@ -1,0 +1,74 @@
+
+{
+  "entities": {
+    "Class": {
+      "title": "Class",
+      "description": "A student classroom group.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "population": { "type": "number" },
+        "votes_cast": { "type": "number" }
+      },
+      "required": ["name", "population"]
+    },
+    "Position": {
+      "title": "Position",
+      "description": "An electoral role (e.g. Head Boy).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "order_index": { "type": "number" }
+      },
+      "required": ["name", "order_index"]
+    },
+    "Candidate": {
+      "title": "Candidate",
+      "description": "A student running for a position.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "position_id": { "type": "string" },
+        "full_name": { "type": "string" },
+        "photo_url": { "type": "string" },
+        "votes": { "type": "number" }
+      },
+      "required": ["position_id", "full_name", "photo_url"]
+    },
+    "VoterToken": {
+      "title": "Voter Token",
+      "description": "A unique one-time code for voting.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "class_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["unused", "used"] },
+        "used_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["class_id", "status"]
+    }
+  },
+  "auth": {
+    "providers": ["google.com"]
+  },
+  "firestore": {
+    "/classes/{classId}": {
+      "schema": "Class",
+      "description": "List of classrooms."
+    },
+    "/positions/{positionId}": {
+      "schema": "Position",
+      "description": "Electoral positions."
+    },
+    "/candidates/{candidateId}": {
+      "schema": "Candidate",
+      "description": "Election candidates."
+    },
+    "/voter_tokens/{tokenId}": {
+      "schema": "VoterToken",
+      "description": "Unique IDs for students to vote."
+    }
+  }
+}
