@@ -2,34 +2,28 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { useCollection, useFirestore, useDoc } from '@/firebase';
-import { collection, doc, setDoc, updateDoc, increment, query, where, orderBy, limit, Timestamp, addDoc, deleteDoc } from 'firebase/firestore';
+import { createClient } from '@/utils/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Key, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users } from 'lucide-react';
+import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users } from 'lucide-react';
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Class, Candidate, Position, VoterToken, SystemConfig } from '@/lib/types';
 import { realtimeElectionInsightGeneration, RealtimeElectionInsightGenerationOutput } from '@/ai/flows/realtime-election-insight-generation';
 import { Progress } from '@/components/ui/progress';
 
 export default function AdminPage() {
-  const db = useFirestore();
-  const { data: classes = [] } = useCollection<Class>(collection(db!, 'classes'));
-  const { data: positions = [] } = useCollection<Position>(collection(db!, 'positions'));
-  const { data: candidates = [] } = useCollection<Candidate>(collection(db!, 'candidates'));
-  const { data: allTokens = [] } = useCollection<VoterToken>(collection(db!, 'voter_tokens'));
-  const { data: config } = useDoc<SystemConfig>(doc(db!, 'system_config', 'election_status'));
-
-  // Activity Feed
-  const activityQuery = useMemo(() => 
-    db ? query(collection(db, 'voter_tokens'), where('status', '==', 'used'), orderBy('used_at', 'desc'), limit(10)) : null
-  , [db]);
-  const { data: recentVotes = [] } = useCollection<VoterToken>(activityQuery);
+  const supabase = createClient();
+  
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [allTokens, setAllTokens] = useState<VoterToken[]>([]);
+  const [config, setConfig] = useState<SystemConfig | null>(null);
+  const [recentVotes, setRecentVotes] = useState<VoterToken[]>([]);
 
   const [activeTab, setActiveTab] = useState('onboarding');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -39,6 +33,38 @@ export default function AdminPage() {
   const [newPosition, setNewPosition] = useState('');
   const [newCandidate, setNewCandidate] = useState({ name: '', positionId: '', photoUrl: '' });
   const [newClass, setNewClass] = useState({ name: '', population: 0 });
+
+  const fetchData = async () => {
+    const { data: cls } = await supabase.from('classes').select('*').order('name');
+    const { data: pos } = await supabase.from('positions').select('*').order('order_index');
+    const { data: cand } = await supabase.from('candidates').select('*');
+    const { data: tokens } = await supabase.from('voter_tokens').select('*');
+    const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').single();
+    const { data: recent } = await supabase.from('voter_tokens').select('*').eq('status', 'used').order('used_at', { ascending: false }).limit(10);
+
+    if (cls) setClasses(cls);
+    if (pos) setPositions(pos);
+    if (cand) setCandidates(cand);
+    if (tokens) setAllTokens(tokens);
+    if (cfg) setConfig(cfg);
+    if (recent) setRecentVotes(recent);
+  };
+
+  useEffect(() => {
+    fetchData();
+
+    const channels = supabase.channel('admin_all')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'positions' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'voter_tokens' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'system_config' }, fetchData)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channels);
+    };
+  }, []);
 
   const stats = useMemo(() => {
     const totalStudents = classes.reduce((acc, curr) => acc + curr.population, 0);
@@ -53,13 +79,13 @@ export default function AdminPage() {
   }, [classes, positions]);
 
   const toggleElection = async () => {
-    const statusRef = doc(db!, 'system_config', 'election_status');
-    await setDoc(statusRef, { is_open: !config?.is_open }, { merge: true });
+    const newStatus = !config?.is_open;
+    await supabase.from('system_config').update({ is_open: newStatus }).eq('id', 'election_status');
   };
 
   const handleAddPosition = async () => {
     if (!newPosition) return;
-    await addDoc(collection(db!, 'positions'), {
+    await supabase.from('positions').insert({
       name: newPosition,
       order_index: positions.length
     });
@@ -68,7 +94,7 @@ export default function AdminPage() {
 
   const handleAddCandidate = async () => {
     if (!newCandidate.name || !newCandidate.positionId) return;
-    await addDoc(collection(db!, 'candidates'), {
+    await supabase.from('candidates').insert({
       full_name: newCandidate.name,
       position_id: newCandidate.positionId,
       photo_url: newCandidate.photoUrl || 'https://picsum.photos/seed/placeholder/400/400',
@@ -79,7 +105,7 @@ export default function AdminPage() {
 
   const handleAddClass = async () => {
     if (!newClass.name || newClass.population <= 0) return;
-    await addDoc(collection(db!, 'classes'), {
+    await supabase.from('classes').insert({
       name: newClass.name,
       population: newClass.population,
       votes_cast: 0
@@ -87,7 +113,7 @@ export default function AdminPage() {
     setNewClass({ name: '', population: 0 });
   };
 
-  const generateTokens = (cls: Class) => {
+  const generateTokens = async (cls: Class) => {
     const count = cls.population + 5;
     const existingTokens = allTokens.filter(t => t.class_id === cls.id);
     
@@ -98,17 +124,19 @@ export default function AdminPage() {
 
     const prefix = cls.name.replace(/\s+/g, '').toUpperCase().substring(0, 3);
     const newTokensNeeded = count - existingTokens.length;
+    const tokensToInsert = [];
 
     for (let i = 0; i < newTokensNeeded; i++) {
       const randomPart = Math.floor(100000 + Math.random() * 900000);
       const tokenId = `${prefix}-${randomPart}`;
-      const tokenRef = doc(db!, 'voter_tokens', tokenId);
-      setDoc(tokenRef, {
+      tokensToInsert.push({
         id: tokenId,
         class_id: cls.id,
         status: 'unused'
       });
     }
+
+    await supabase.from('voter_tokens').insert(tokensToInsert);
   };
 
   const runAiAnalysis = async () => {
@@ -116,7 +144,7 @@ export default function AdminPage() {
     try {
       const hourMap: Record<number, number> = {};
       allTokens.filter(t => t.status === 'used' && t.used_at).forEach(t => {
-        const date = t.used_at instanceof Timestamp ? t.used_at.toDate() : new Date(t.used_at!);
+        const date = new Date(t.used_at!);
         const hour = date.getHours();
         hourMap[hour] = (hourMap[hour] || 0) + 1;
       });
@@ -159,6 +187,10 @@ export default function AdminPage() {
     document.body.removeChild(link);
   };
 
+  const deleteItem = async (table: string, id: string) => {
+    await supabase.from(table).delete().eq('id', id);
+  };
+
   return (
     <SidebarProvider>
       <Sidebar className="bg-secondary text-white border-none">
@@ -195,7 +227,7 @@ export default function AdminPage() {
         <header className="h-20 border-b bg-white flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             <SidebarTrigger className="md:hidden" />
-            <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center</h1>
+            <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center (Supabase)</h1>
           </div>
           <div className="flex items-center gap-4">
             <Badge variant={config?.is_open ? "default" : "secondary"} className={config?.is_open ? "bg-emerald-500 animate-pulse" : ""}>
@@ -212,7 +244,6 @@ export default function AdminPage() {
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
             <TabsContent value="onboarding" className="space-y-8 m-0">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Step 1: Positions */}
                 <Card className="border-none shadow-md">
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2"><Plus className="w-5 h-5" /> 1. Define Positions</CardTitle>
@@ -227,14 +258,13 @@ export default function AdminPage() {
                       {positions.map(p => (
                         <div key={p.id} className="flex justify-between items-center p-2 bg-muted rounded-md">
                           <span className="font-bold">{p.name}</span>
-                          <Button variant="ghost" size="sm" onClick={() => deleteDoc(doc(db!, 'positions', p.id))}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => deleteItem('positions', p.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                         </div>
                       ))}
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Step 2: Candidates */}
                 <Card className="border-none shadow-md">
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2"><UserPlus className="w-5 h-5" /> 2. Register Candidates</CardTitle>
@@ -259,14 +289,13 @@ export default function AdminPage() {
                             <span className="font-bold">{c.full_name}</span>
                             <span className="text-xs text-muted-foreground">{positions.find(p => p.id === c.position_id)?.name}</span>
                           </div>
-                          <Button variant="ghost" size="sm" onClick={() => deleteDoc(doc(db!, 'candidates', c.id))}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                          <Button variant="ghost" size="sm" onClick={() => deleteItem('candidates', c.id)}><Trash2 className="w-4 h-4 text-destructive" /></Button>
                         </div>
                       ))}
                     </div>
                   </CardContent>
                 </Card>
 
-                {/* Step 3: Classes & Token Prep */}
                 <Card className="border-none shadow-md md:col-span-2">
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5" /> 3. Class Management & Token Generation</CardTitle>
@@ -310,7 +339,7 @@ export default function AdminPage() {
                                 <Button size="sm" variant="outline" onClick={() => exportTokens(cls)} disabled={tokens.length === 0}>
                                   <Download className="w-4 h-4" />
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => deleteDoc(doc(db!, 'classes', cls.id))}>
+                                <Button size="sm" variant="ghost" onClick={() => deleteItem('classes', cls.id)}>
                                   <Trash2 className="w-4 h-4 text-destructive" />
                                 </Button>
                               </TableCell>

@@ -1,9 +1,8 @@
 
 "use client";
 
-import { useMemo } from 'react';
-import { useCollection, useFirestore } from '@/firebase';
-import { collection } from 'firebase/firestore';
+import { useState, useEffect, useMemo } from 'react';
+import { createClient } from '@/utils/supabase/client';
 import { ElectionHeader } from '@/components/shared/ElectionHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,10 +15,31 @@ import Image from 'next/image';
 import { Class, Candidate, Position } from '@/lib/types';
 
 export default function ResultsPage() {
-  const db = useFirestore();
-  const { data: classes = [] } = useCollection<Class>(collection(db!, 'classes'));
-  const { data: positions = [] } = useCollection<Position>(collection(db!, 'positions'));
-  const { data: candidates = [] } = useCollection<Candidate>(collection(db!, 'candidates'));
+  const supabase = createClient();
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+
+  const fetchData = async () => {
+    const { data: cls } = await supabase.from('classes').select('*').order('name');
+    const { data: pos } = await supabase.from('positions').select('*').order('order_index');
+    const { data: cand } = await supabase.from('candidates').select('*');
+
+    if (cls) setClasses(cls);
+    if (pos) setPositions(pos);
+    if (cand) setCandidates(cand);
+  };
+
+  useEffect(() => {
+    fetchData();
+
+    const channel = supabase.channel('results_live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, fetchData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, fetchData)
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   const totals = useMemo(() => {
     const votes = classes.reduce((acc, curr) => acc + (curr.votes_cast || 0), 0);
@@ -80,7 +100,7 @@ export default function ResultsPage() {
         </div>
 
         <div className="space-y-16">
-          {positions.sort((a,b) => a.order_index - b.order_index).map(pos => {
+          {positions.map(pos => {
             const posCandidates = candidates
               .filter(c => c.position_id === pos.id)
               .sort((a, b) => (b.votes || 0) - (a.votes || 0));

@@ -3,22 +3,22 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useFirestore, useCollection, useDoc } from '@/firebase';
-import { collection, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
-import { Class, Position, Candidate, VoterToken, SystemConfig } from '@/lib/types';
+import { createClient } from '@/utils/supabase/client';
+import { Position, Candidate, VoterToken, SystemConfig } from '@/lib/types';
 import { ElectionHeader } from '@/components/shared/ElectionHeader';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, ChevronRight, AlertTriangle, ArrowLeft, Key, Lock } from 'lucide-react';
+import { CheckCircle2, ChevronRight, AlertTriangle, Key, Lock } from 'lucide-react';
 import Image from 'next/image';
 
 export default function VotePage() {
-  const db = useFirestore();
-  const { data: positions = [] } = useCollection<Position>(collection(db!, 'positions'));
-  const { data: candidates = [] } = useCollection<Candidate>(collection(db!, 'candidates'));
-  const { data: config } = useDoc<SystemConfig>(doc(db!, 'system_config', 'election_status'));
+  const supabase = createClient();
+  
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [config, setConfig] = useState<SystemConfig | null>(null);
 
   const [step, setStep] = useState<'token' | 'voting' | 'confirm' | 'success'>('token');
   const [tokenInput, setTokenInput] = useState('');
@@ -27,14 +27,39 @@ export default function VotePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data: pos } = await supabase.from('positions').select('*').order('order_index');
+      const { data: cand } = await supabase.from('candidates').select('*');
+      const { data: cfg } = await supabase.from('system_config').select('*').eq('id', 'election_status').single();
+      
+      if (pos) setPositions(pos);
+      if (cand) setCandidates(cand);
+      if (cfg) setConfig(cfg);
+    };
+    fetchData();
+
+    // Real-time election status listener
+    const channel = supabase.channel('status_check')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'system_config' }, payload => {
+        setConfig(payload.new as SystemConfig);
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const validateToken = async () => {
     if (!tokenInput) return;
     setError(null);
-    const tokenRef = doc(db!, 'voter_tokens', tokenInput.toUpperCase());
-    const snap = await getDoc(tokenRef);
     
-    if (snap.exists()) {
-      const data = snap.data() as VoterToken;
+    const { data, error: fetchError } = await supabase
+      .from('voter_tokens')
+      .select('*')
+      .eq('id', tokenInput.toUpperCase())
+      .single();
+    
+    if (data) {
       if (data.status === 'used') {
         setError("This token has already been used.");
       } else {
@@ -57,16 +82,21 @@ export default function VotePage() {
     setIsSubmitting(true);
     
     try {
-      const tokenRef = doc(db!, 'voter_tokens', currentToken.id);
-      await updateDoc(tokenRef, { status: 'used', used_at: serverTimestamp() });
+      // 1. Mark token as used
+      await supabase.from('voter_tokens').update({ 
+        status: 'used', 
+        used_at: new Date().toISOString() 
+      }).eq('id', currentToken.id);
 
-      const classRef = doc(db!, 'classes', currentToken.class_id);
-      await updateDoc(classRef, { votes_cast: increment(1) });
+      // 2. Increment class votes_cast
+      const { data: clsData } = await supabase.from('classes').select('votes_cast').eq('id', currentToken.class_id).single();
+      await supabase.from('classes').update({ votes_cast: (clsData?.votes_cast || 0) + 1 }).eq('id', currentToken.class_id);
 
+      // 3. Increment candidate votes
       for (const posId of Object.keys(selections)) {
         const candId = selections[posId];
-        const candRef = doc(db!, 'candidates', candId);
-        await updateDoc(candRef, { votes: increment(1) });
+        const { data: candData } = await supabase.from('candidates').select('votes').eq('id', candId).single();
+        await supabase.from('candidates').update({ votes: (candData?.votes || 0) + 1 }).eq('id', candId);
       }
 
       setStep('success');
@@ -118,7 +148,7 @@ export default function VotePage() {
           <div className="max-w-md mx-auto space-y-6">
             <header className="text-center space-y-2">
               <h2 className="text-2xl font-headline font-bold text-secondary">Voter Authentication</h2>
-              <p className="text-muted-foreground">Enter your unique prefixed student voter token</p>
+              <p className="text-muted-foreground">Enter your unique student voter token</p>
             </header>
             <Card className="border-none shadow-xl">
               <CardContent className="pt-8 space-y-6">
@@ -139,7 +169,7 @@ export default function VotePage() {
                 <Button className="w-full h-14 text-lg font-bold" onClick={validateToken}>Authenticate</Button>
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-amber-800 text-xs">
                   <AlertTriangle className="w-5 h-5 shrink-0" />
-                  <p>Each token is valid for a single voting session. Please consult your class teacher if your token is missing or invalid.</p>
+                  <p>Each token is valid for a single voting session. Tokens are distributed by class teachers.</p>
                 </div>
               </CardContent>
             </Card>
@@ -151,7 +181,7 @@ export default function VotePage() {
             <div className="flex items-center justify-between sticky top-[80px] bg-[#F5F5F5]/90 backdrop-blur p-4 z-40 rounded-xl">
               <div>
                 <h2 className="text-2xl font-headline font-bold text-secondary">Digital Ballot</h2>
-                <p className="text-muted-foreground">Logged in with token: <span className="font-bold text-primary">{currentToken?.id}</span></p>
+                <p className="text-muted-foreground">Token: <span className="font-bold text-primary">{currentToken?.id}</span></p>
               </div>
               <Badge className="bg-primary text-white h-8 px-4 text-sm">
                 {Object.keys(selections).length} / {positions.length} Selected

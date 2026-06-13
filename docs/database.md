@@ -1,37 +1,48 @@
 
-# Database Infrastructure Documentation
+# Database Infrastructure Documentation (Supabase/PostgreSQL)
 
-This application is prototyped using **Cloud Firestore** for real-time reactivity, but it is fully compatible with relational structures like **Supabase/PostgreSQL**.
+This application has been migrated from Firebase to **Supabase (PostgreSQL)** to provide a relational structure while maintaining real-time capabilities.
 
-## SQL Implementation (Supabase)
-For your Supabase setup, please refer to the `docs/schema.sql` file. It contains the DDL (Data Definition Language) to create the following tables:
+## SQL Implementation
+The following tables are defined in `docs/schema.sql` and must be created in your Supabase SQL Editor:
 
 ### `classes`
+Tracks student groups and their voting progress.
 - `id` (uuid): Primary key.
-- `name` (text): Class name (e.g., "Grade 6A").
-- `population` (int): Number of students.
+- `name` (text): Class name (e.g., "Grade A1").
+- `population` (int): Total students in the class.
 - `votes_cast` (int): Counter for used tokens.
 
 ### `positions`
+Electoral roles available for contest.
 - `id` (uuid): Primary key.
-- `name` (text): Electoral role title.
-- `order_index` (int): Sorting sequence.
+- `name` (text): Role title (e.g., "Head Boy").
+- `order_index` (int): Sort sequence.
 
 ### `candidates`
+Registered candidates contesting for specific positions.
 - `id` (uuid): Primary key.
-- `position_id` (uuid): Foreign key to `positions`.
+- `position_id` (uuid): FK to `positions`.
 - `full_name` (text): Candidate name.
-- `photo_url` (text): URL to portrait image.
-- `votes` (int): Total votes received.
+- `photo_url` (text): Portrait image URL.
+- `votes` (int): Tally of received votes.
 
 ### `voter_tokens`
-- `id` (text): 6-digit unique code.
-- `class_id` (uuid): Foreign key to `classes`.
+Unique one-time identifiers for student authentication.
+- `id` (text): Unique code (prefixed by class name, e.g., "G6A-123456").
+- `class_id` (uuid): FK to `classes`.
 - `status` (text): "unused" | "used".
-- `used_at` (timestamp): When the vote was recorded.
+- `used_at` (timestamp): Recorded timestamp of the vote.
 
-## Migration Utilities
-I have provided standard Supabase SSR helpers in `src/utils/supabase/` to help you manage sessions and data fetching in your local environment.
+### `system_config`
+Global settings for the election.
+- `id` (text): "election_status".
+- `is_open` (boolean): Controls whether polls are accessible.
 
-## Prototype Environment
-Please note that the **Live Preview** in this Studio continues to use **Firebase**. This ensures that the real-time AI Insights and the Live Activity Feed remain fully functional during the design process.
+## Real-time Integration
+All tables have **Supabase Realtime** enabled. The frontend uses PostgreSQL change listeners to update dashboards instantly as votes are cast.
+
+## Token Generation Logic
+- **Target**: `Class Population + 5` (for reserve/troubleshooting).
+- **Prefix**: First 3 characters of class name (e.g., "G6A-").
+- **Randomization**: 6-digit random suffix to ensure security.
