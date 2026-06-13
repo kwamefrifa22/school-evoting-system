@@ -1,39 +1,37 @@
 
-# Database Schema Documentation (Firestore)
+# Database Schema Documentation
 
-This application uses Google Cloud Firestore (NoSQL) to manage electoral data. Below is the structure and purpose of each collection.
+This application uses **Cloud Firestore** for its real-time backend. Below is the document-based schema and its relational SQL equivalent for reference.
 
-## Collections
+## Firestore Collections (Active)
 
 ### `classes`
-Stores information about each student group.
 - `id` (string): Unique identifier.
-- `name` (string): Name of the class (e.g., "Grade 6A").
-- `population` (number): Total students in the class.
-- `votes_cast` (number): Current count of used tokens from this class.
+- `name` (string): e.g., "Grade 6A".
+- `population` (number): Total students.
+- `votes_cast` (number): Atomic counter of used tokens.
 
 ### `positions`
-Stores the roles being contested.
 - `id` (string): Unique identifier.
-- `name` (string): Role title (e.g., "School Prefect").
-- `order_index` (number): Sorting order for UI.
+- `name` (string): Role title.
+- `order_index` (number): Sorting order.
 
 ### `candidates`
-Stores details of students running for office.
 - `id` (string): Unique identifier.
-- `position_id` (string): Reference to the `positions` collection.
-- `full_name` (string): Candidate's name.
-- `photo_url` (string): URL to candidate's portrait.
-- `votes` (number): Current vote tally.
+- `position_id` (string): Reference to positions.
+- `full_name` (string): Candidate name.
+- `photo_url` (string): Portrait URL.
+- `votes` (number): Atomic vote count.
 
 ### `voter_tokens`
-Stores the unique IDs generated for students.
-- `id` (string): The actual token code (randomized string).
-- `class_id` (string): Reference to the `classes` collection.
-- `status` (string): Either `unused` or `used`.
-- `used_at` (timestamp/string): When the token was consumed.
+- `id` (string): 6-character unique code.
+- `class_id` (string): Reference to classes.
+- `status` (string): "unused" | "used".
+- `used_at` (timestamp): When the vote was cast.
 
-## Business Logic
-1. **Token Generation**: Each class is assigned `population + 5` tokens.
-2. **One-Time Use**: When a student enters a token, the system checks if it exists and has status `unused`.
-3. **Atomic Updates**: On vote submission, the token status is updated to `used`, the class `votes_cast` is incremented, and the candidate `votes` are incremented.
+## SQL Schema Reference (Exportable)
+For users preferring a relational structure (e.g., Supabase/PostgreSQL), the following DDL defines the equivalent structure.
+
+```sql
+-- See docs/schema.sql for the full implementation
+```
