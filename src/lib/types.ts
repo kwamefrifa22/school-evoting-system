@@ -24,10 +24,10 @@ export interface VoterToken {
   id: string;
   class_id: string;
   status: 'unused' | 'used';
-  used_at?: string;
+  used_at?: any;
 }
 
-export interface VoteSelection {
-  position_id: string;
-  candidate_id: string;
+export interface SystemConfig {
+  id: 'election_status';
+  is_open: boolean;
 }

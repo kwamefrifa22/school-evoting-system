@@ -3,22 +3,22 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useFirestore, useCollection } from '@/firebase';
+import { useFirestore, useCollection, useDoc } from '@/firebase';
 import { collection, doc, getDoc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
-import { Class, Position, Candidate, VoterToken } from '@/lib/types';
+import { Class, Position, Candidate, VoterToken, SystemConfig } from '@/lib/types';
 import { ElectionHeader } from '@/components/shared/ElectionHeader';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, ChevronRight, AlertTriangle, ArrowLeft, Key } from 'lucide-react';
+import { CheckCircle2, ChevronRight, AlertTriangle, ArrowLeft, Key, Lock } from 'lucide-react';
 import Image from 'next/image';
 
 export default function VotePage() {
   const db = useFirestore();
   const { data: positions = [] } = useCollection<Position>(collection(db!, 'positions'));
   const { data: candidates = [] } = useCollection<Candidate>(collection(db!, 'candidates'));
-  const { data: classes = [] } = useCollection<Class>(collection(db!, 'classes'));
+  const { data: config } = useDoc<SystemConfig>(doc(db!, 'system_config', 'election_status'));
 
   const [step, setStep] = useState<'token' | 'voting' | 'confirm' | 'success'>('token');
   const [tokenInput, setTokenInput] = useState('');
@@ -42,7 +42,7 @@ export default function VotePage() {
         setStep('voting');
       }
     } else {
-      setError("Invalid token code.");
+      setError("Invalid token code. Please check your printed token.");
     }
   };
 
@@ -57,15 +57,12 @@ export default function VotePage() {
     setIsSubmitting(true);
     
     try {
-      // 1. Mark token as used
       const tokenRef = doc(db!, 'voter_tokens', currentToken.id);
       await updateDoc(tokenRef, { status: 'used', used_at: serverTimestamp() });
 
-      // 2. Increment class votes
       const classRef = doc(db!, 'classes', currentToken.class_id);
       await updateDoc(classRef, { votes_cast: increment(1) });
 
-      // 3. Increment candidate votes
       for (const posId of Object.keys(selections)) {
         const candId = selections[posId];
         const candRef = doc(db!, 'candidates', candId);
@@ -79,6 +76,23 @@ export default function VotePage() {
       setIsSubmitting(false);
     }
   };
+
+  if (!config?.is_open && step !== 'success') {
+    return (
+      <div className="min-h-screen bg-secondary flex items-center justify-center p-4">
+        <Card className="max-w-md w-full border-none shadow-2xl">
+          <CardHeader className="text-center">
+            <Lock className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+            <CardTitle className="text-2xl font-headline font-black text-secondary">POLLS ARE CLOSED</CardTitle>
+            <CardDescription>Voting is currently disabled. Please wait for an administrator to open the polls.</CardDescription>
+          </CardHeader>
+          <CardContent>
+             <Button className="w-full" variant="outline" onClick={() => window.location.href = '/'}>Return Home</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (step === 'success') {
     return (
@@ -104,7 +118,7 @@ export default function VotePage() {
           <div className="max-w-md mx-auto space-y-6">
             <header className="text-center space-y-2">
               <h2 className="text-2xl font-headline font-bold text-secondary">Voter Authentication</h2>
-              <p className="text-muted-foreground">Enter your unique student voter token</p>
+              <p className="text-muted-foreground">Enter your unique prefixed student voter token</p>
             </header>
             <Card className="border-none shadow-xl">
               <CardContent className="pt-8 space-y-6">
@@ -114,7 +128,7 @@ export default function VotePage() {
                     <Key className="absolute left-3 top-3 text-muted-foreground w-5 h-5" />
                     <Input 
                       className="h-14 pl-12 text-2xl font-black uppercase tracking-widest text-primary"
-                      placeholder="6-DIGIT CODE"
+                      placeholder="ABC-123456"
                       value={tokenInput}
                       onChange={(e) => setTokenInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && validateToken()}

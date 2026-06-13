@@ -2,16 +2,18 @@
 "use client";
 
 import { useState, useMemo, useEffect } from 'react';
-import { useCollection, useFirestore } from '@/firebase';
-import { collection, doc, setDoc, updateDoc, increment, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { useCollection, useFirestore, useDoc } from '@/firebase';
+import { collection, doc, setDoc, updateDoc, increment, query, where, orderBy, limit, Timestamp, addDoc, deleteDoc } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Key, Download, Activity, Sparkles, RefreshCcw } from 'lucide-react';
+import { Plus, UserPlus, LayoutDashboard, BrainCircuit, Key, Download, Activity, Sparkles, RefreshCcw, Trash2, CheckCircle2, Lock, Settings2, Users } from 'lucide-react';
 import { SidebarProvider, Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
-import { Class, Candidate, Position, VoterToken } from '@/lib/types';
+import { Class, Candidate, Position, VoterToken, SystemConfig } from '@/lib/types';
 import { realtimeElectionInsightGeneration, RealtimeElectionInsightGenerationOutput } from '@/ai/flows/realtime-election-insight-generation';
 import { Progress } from '@/components/ui/progress';
 
@@ -19,17 +21,24 @@ export default function AdminPage() {
   const db = useFirestore();
   const { data: classes = [] } = useCollection<Class>(collection(db!, 'classes'));
   const { data: positions = [] } = useCollection<Position>(collection(db!, 'positions'));
+  const { data: candidates = [] } = useCollection<Candidate>(collection(db!, 'candidates'));
   const { data: allTokens = [] } = useCollection<VoterToken>(collection(db!, 'voter_tokens'));
-  
-  // Real-time Activity Feed (last 10 votes)
+  const { data: config } = useDoc<SystemConfig>(doc(db!, 'system_config', 'election_status'));
+
+  // Activity Feed
   const activityQuery = useMemo(() => 
     db ? query(collection(db, 'voter_tokens'), where('status', '==', 'used'), orderBy('used_at', 'desc'), limit(10)) : null
   , [db]);
   const { data: recentVotes = [] } = useCollection<VoterToken>(activityQuery);
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('onboarding');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiInsight, setAiInsight] = useState<RealtimeElectionInsightGenerationOutput | null>(null);
+
+  // Form States
+  const [newPosition, setNewPosition] = useState('');
+  const [newCandidate, setNewCandidate] = useState({ name: '', positionId: '', photoUrl: '' });
+  const [newClass, setNewClass] = useState({ name: '', population: 0 });
 
   const stats = useMemo(() => {
     const totalStudents = classes.reduce((acc, curr) => acc + curr.population, 0);
@@ -43,10 +52,68 @@ export default function AdminPage() {
     };
   }, [classes, positions]);
 
+  const toggleElection = async () => {
+    const statusRef = doc(db!, 'system_config', 'election_status');
+    await setDoc(statusRef, { is_open: !config?.is_open }, { merge: true });
+  };
+
+  const handleAddPosition = async () => {
+    if (!newPosition) return;
+    await addDoc(collection(db!, 'positions'), {
+      name: newPosition,
+      order_index: positions.length
+    });
+    setNewPosition('');
+  };
+
+  const handleAddCandidate = async () => {
+    if (!newCandidate.name || !newCandidate.positionId) return;
+    await addDoc(collection(db!, 'candidates'), {
+      full_name: newCandidate.name,
+      position_id: newCandidate.positionId,
+      photo_url: newCandidate.photoUrl || 'https://picsum.photos/seed/placeholder/400/400',
+      votes: 0
+    });
+    setNewCandidate({ name: '', positionId: '', photoUrl: '' });
+  };
+
+  const handleAddClass = async () => {
+    if (!newClass.name || newClass.population <= 0) return;
+    await addDoc(collection(db!, 'classes'), {
+      name: newClass.name,
+      population: newClass.population,
+      votes_cast: 0
+    });
+    setNewClass({ name: '', population: 0 });
+  };
+
+  const generateTokens = (cls: Class) => {
+    const count = cls.population + 5;
+    const existingTokens = allTokens.filter(t => t.class_id === cls.id);
+    
+    if (existingTokens.length >= count) {
+      alert("Tokens already generated for this class.");
+      return;
+    }
+
+    const prefix = cls.name.replace(/\s+/g, '').toUpperCase().substring(0, 3);
+    const newTokensNeeded = count - existingTokens.length;
+
+    for (let i = 0; i < newTokensNeeded; i++) {
+      const randomPart = Math.floor(100000 + Math.random() * 900000);
+      const tokenId = `${prefix}-${randomPart}`;
+      const tokenRef = doc(db!, 'voter_tokens', tokenId);
+      setDoc(tokenRef, {
+        id: tokenId,
+        class_id: cls.id,
+        status: 'unused'
+      });
+    }
+  };
+
   const runAiAnalysis = async () => {
     setIsAnalyzing(true);
     try {
-      // Prepare trend data (votes per hour)
       const hourMap: Record<number, number> = {};
       allTokens.filter(t => t.status === 'used' && t.used_at).forEach(t => {
         const date = t.used_at instanceof Timestamp ? t.used_at.toDate() : new Date(t.used_at!);
@@ -68,34 +135,13 @@ export default function AdminPage() {
           population: c.population,
           votesCast: c.votes_cast || 0
         })),
-        electionStatus: 'open'
+        electionStatus: config?.is_open ? 'open' : 'closed'
       });
       setAiInsight(result);
     } catch (error) {
       console.error("AI Analysis failed:", error);
     } finally {
       setIsAnalyzing(false);
-    }
-  };
-
-  const generateTokens = (cls: Class) => {
-    const count = cls.population + 5;
-    const existingTokens = allTokens.filter(t => t.class_id === cls.id);
-    
-    if (existingTokens.length >= count) {
-      alert("Tokens already generated for this class.");
-      return;
-    }
-
-    const newTokensNeeded = count - existingTokens.length;
-    for (let i = 0; i < newTokensNeeded; i++) {
-      const tokenId = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const tokenRef = doc(db!, 'voter_tokens', tokenId);
-      setDoc(tokenRef, {
-        id: tokenId,
-        class_id: cls.id,
-        status: 'unused'
-      });
     }
   };
 
@@ -121,11 +167,16 @@ export default function AdminPage() {
             <div className="bg-primary p-2 rounded-lg">
               <Activity className="w-5 h-5" />
             </div>
-            <h2 className="font-headline font-black text-xl tracking-tight uppercase">Sovereign Live</h2>
+            <h2 className="font-headline font-black text-xl tracking-tight uppercase">Sovereign Admin</h2>
           </div>
         </SidebarHeader>
         <SidebarContent className="p-4">
           <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={() => setActiveTab('onboarding')} isActive={activeTab === 'onboarding'} className="hover:bg-white/10 h-12 text-white data-[active=true]:bg-primary">
+                <Settings2 className="w-5 h-5 mr-3" /> System Setup
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton onClick={() => setActiveTab('overview')} isActive={activeTab === 'overview'} className="hover:bg-white/10 h-12 text-white data-[active=true]:bg-primary">
                 <LayoutDashboard className="w-5 h-5 mr-3" /> Dashboard
@@ -134,11 +185,6 @@ export default function AdminPage() {
             <SidebarMenuItem>
               <SidebarMenuButton onClick={() => setActiveTab('insights')} isActive={activeTab === 'insights'} className="hover:bg-white/10 h-12 text-white data-[active=true]:bg-primary">
                 <BrainCircuit className="w-5 h-5 mr-3" /> AI Insights
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={() => setActiveTab('tokens')} isActive={activeTab === 'tokens'} className="hover:bg-white/10 h-12 text-white data-[active=true]:bg-primary">
-                <Key className="w-5 h-5 mr-3" /> Voter Tokens
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -151,13 +197,133 @@ export default function AdminPage() {
             <SidebarTrigger className="md:hidden" />
             <h1 className="text-xl font-headline font-black text-secondary uppercase tracking-tight">Electoral Control Center</h1>
           </div>
-          <Badge variant="outline" className="animate-pulse bg-emerald-50 text-emerald-700 border-emerald-200">
-            ● Live System Connected
-          </Badge>
+          <div className="flex items-center gap-4">
+            <Badge variant={config?.is_open ? "default" : "secondary"} className={config?.is_open ? "bg-emerald-500 animate-pulse" : ""}>
+              {config?.is_open ? "ELECTION LIVE" : "ELECTION CLOSED"}
+            </Badge>
+            <Button size="sm" variant={config?.is_open ? "destructive" : "default"} onClick={toggleElection}>
+              {config?.is_open ? <Lock className="w-4 h-4 mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+              {config?.is_open ? "Close Polls" : "Open Election"}
+            </Button>
+          </div>
         </header>
 
         <main className="p-8">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
+            <TabsContent value="onboarding" className="space-y-8 m-0">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Step 1: Positions */}
+                <Card className="border-none shadow-md">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2"><Plus className="w-5 h-5" /> 1. Define Positions</CardTitle>
+                    <CardDescription>Add roles that students will contest for.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex gap-2">
+                      <Input placeholder="e.g., Head Prefect" value={newPosition} onChange={e => setNewPosition(e.target.value)} />
+                      <Button onClick={handleAddPosition}>Add</Button>
+                    </div>
+                    <div className="space-y-2">
+                      {positions.map(p => (
+                        <div key={p.id} className="flex justify-between items-center p-2 bg-muted rounded-md">
+                          <span className="font-bold">{p.name}</span>
+                          <Button variant="ghost" size="sm" onClick={() => deleteDoc(doc(db!, 'positions', p.id))}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Step 2: Candidates */}
+                <Card className="border-none shadow-md">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2"><UserPlus className="w-5 h-5" /> 2. Register Candidates</CardTitle>
+                    <CardDescription>Assign candidates to positions.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <Input placeholder="Candidate Full Name" value={newCandidate.name} onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} />
+                    <select 
+                      className="w-full h-10 px-3 rounded-md border"
+                      value={newCandidate.positionId}
+                      onChange={e => setNewCandidate({...newCandidate, positionId: e.target.value})}
+                    >
+                      <option value="">Select Position</option>
+                      {positions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <Input placeholder="Photo URL (Optional)" value={newCandidate.photoUrl} onChange={e => setNewCandidate({...newCandidate, photoUrl: e.target.value})} />
+                    <Button className="w-full" onClick={handleAddCandidate}>Add Candidate</Button>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {candidates.map(c => (
+                        <div key={c.id} className="flex justify-between items-center p-2 bg-muted rounded-md">
+                          <div className="flex flex-col">
+                            <span className="font-bold">{c.full_name}</span>
+                            <span className="text-xs text-muted-foreground">{positions.find(p => p.id === c.position_id)?.name}</span>
+                          </div>
+                          <Button variant="ghost" size="sm" onClick={() => deleteDoc(doc(db!, 'candidates', c.id))}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Step 3: Classes & Token Prep */}
+                <Card className="border-none shadow-md md:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5" /> 3. Class Management & Token Generation</CardTitle>
+                    <CardDescription>Set population and generate unique prefixed tokens (Population + 5).</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <Input placeholder="Class Name (e.g., Grade A1)" value={newClass.name} onChange={e => setNewClass({...newClass, name: e.target.value})} />
+                      <Input type="number" placeholder="Class Size" value={newClass.population} onChange={e => setNewClass({...newClass, population: parseInt(e.target.value)})} />
+                      <Button onClick={handleAddClass}>Add Class</Button>
+                    </div>
+                    
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Class</TableHead>
+                          <TableHead>Population</TableHead>
+                          <TableHead>Target Tokens</TableHead>
+                          <TableHead>Current Count</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {classes.map(cls => {
+                          const tokens = allTokens.filter(t => t.class_id === cls.id);
+                          const isGenerated = tokens.length >= cls.population + 5;
+                          return (
+                            <TableRow key={cls.id}>
+                              <TableCell className="font-bold">{cls.name}</TableCell>
+                              <TableCell>{cls.population}</TableCell>
+                              <TableCell>{cls.population + 5}</TableCell>
+                              <TableCell>
+                                <Badge variant={isGenerated ? "default" : "outline"}>
+                                  {tokens.length}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right flex justify-end gap-2">
+                                <Button size="sm" variant="outline" onClick={() => generateTokens(cls)} disabled={isGenerated}>
+                                  Generate Tokens
+                                </Button>
+                                <Button size="sm" variant="outline" onClick={() => exportTokens(cls)} disabled={tokens.length === 0}>
+                                  <Download className="w-4 h-4" />
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => deleteDoc(doc(db!, 'classes', cls.id))}>
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+            </TabsContent>
+
             <TabsContent value="overview" className="space-y-8 m-0">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 {[
@@ -304,46 +470,9 @@ export default function AdminPage() {
                 </div>
               )}
             </TabsContent>
-
-            <TabsContent value="tokens" className="space-y-8 m-0">
-              <header className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-headline font-black text-secondary uppercase">Voter Tokens</h2>
-                  <p className="text-muted-foreground">Manage and export unique IDs for each student</p>
-                </div>
-              </header>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {classes.map(cls => {
-                  const tokens = allTokens.filter(t => t.class_id === cls.id);
-                  const isGenerated = tokens.length >= cls.population + 5;
-                  return (
-                    <Card key={cls.id} className="border-none shadow-sm overflow-hidden group">
-                      <div className={`h-1.5 w-full ${isGenerated ? 'bg-primary' : 'bg-muted'}`} />
-                      <CardHeader>
-                        <CardTitle className="text-md flex justify-between items-center">
-                          {cls.name}
-                          <Badge variant={isGenerated ? "default" : "outline"}>{tokens.length} / {cls.population + 5}</Badge>
-                        </CardTitle>
-                        <CardDescription>Target: {cls.population + 5} tokens</CardDescription>
-                      </CardHeader>
-                      <CardContent className="flex gap-2">
-                        <Button className="flex-1" variant={isGenerated ? "outline" : "secondary"} onClick={() => generateTokens(cls)}>
-                          {isGenerated ? "Top Up" : "Generate"}
-                        </Button>
-                        <Button className="flex-1" variant="outline" onClick={() => exportTokens(cls)} disabled={tokens.length === 0}>
-                          <Download className="w-4 h-4 mr-2" /> Export
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            </TabsContent>
           </Tabs>
         </main>
       </SidebarInset>
     </SidebarProvider>
   );
 }
-
