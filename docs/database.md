@@ -1,37 +1,37 @@
 
-# Database Schema Documentation
+# Database Infrastructure Documentation
 
-This application uses **Cloud Firestore** for its real-time backend. Below is the document-based schema and its relational SQL equivalent for reference.
+This application is prototyped using **Cloud Firestore** for real-time reactivity, but it is fully compatible with relational structures like **Supabase/PostgreSQL**.
 
-## Firestore Collections (Active)
+## SQL Implementation (Supabase)
+For your Supabase setup, please refer to the `docs/schema.sql` file. It contains the DDL (Data Definition Language) to create the following tables:
 
 ### `classes`
-- `id` (string): Unique identifier.
-- `name` (string): e.g., "Grade 6A".
-- `population` (number): Total students.
-- `votes_cast` (number): Atomic counter of used tokens.
+- `id` (uuid): Primary key.
+- `name` (text): Class name (e.g., "Grade 6A").
+- `population` (int): Number of students.
+- `votes_cast` (int): Counter for used tokens.
 
 ### `positions`
-- `id` (string): Unique identifier.
-- `name` (string): Role title.
-- `order_index` (number): Sorting order.
+- `id` (uuid): Primary key.
+- `name` (text): Electoral role title.
+- `order_index` (int): Sorting sequence.
 
 ### `candidates`
-- `id` (string): Unique identifier.
-- `position_id` (string): Reference to positions.
-- `full_name` (string): Candidate name.
-- `photo_url` (string): Portrait URL.
-- `votes` (number): Atomic vote count.
+- `id` (uuid): Primary key.
+- `position_id` (uuid): Foreign key to `positions`.
+- `full_name` (text): Candidate name.
+- `photo_url` (text): URL to portrait image.
+- `votes` (int): Total votes received.
 
 ### `voter_tokens`
-- `id` (string): 6-character unique code.
-- `class_id` (string): Reference to classes.
-- `status` (string): "unused" | "used".
-- `used_at` (timestamp): When the vote was cast.
+- `id` (text): 6-digit unique code.
+- `class_id` (uuid): Foreign key to `classes`.
+- `status` (text): "unused" | "used".
+- `used_at` (timestamp): When the vote was recorded.
 
-## SQL Schema Reference (Exportable)
-For users preferring a relational structure (e.g., Supabase/PostgreSQL), the following DDL defines the equivalent structure.
+## Migration Utilities
+I have provided standard Supabase SSR helpers in `src/utils/supabase/` to help you manage sessions and data fetching in your local environment.
 
-```sql
--- See docs/schema.sql for the full implementation
-```
+## Prototype Environment
+Please note that the **Live Preview** in this Studio continues to use **Firebase**. This ensures that the real-time AI Insights and the Live Activity Feed remain fully functional during the design process.
