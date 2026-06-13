@@ -1,4 +1,3 @@
-
 -- CIS Sovereign Election System - Supabase/PostgreSQL Schema
 
 -- 1. Classes Table
@@ -42,10 +41,10 @@ CREATE TABLE IF NOT EXISTS system_config (
     id TEXT PRIMARY KEY,
     is_open BOOLEAN DEFAULT false,
     opened_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Initialize config if not exists
+-- Seed initial config if not exists
 INSERT INTO system_config (id, is_open) 
 VALUES ('election_status', false) 
 ON CONFLICT (id) DO NOTHING;
@@ -70,15 +69,16 @@ BEGIN
     END IF;
 END $$;
 
--- RLS Policies
+-- Security Rules
 ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voter_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Full Access" ON classes FOR ALL USING (true);
-CREATE POLICY "Full Access" ON positions FOR ALL USING (true);
-CREATE POLICY "Full Access" ON candidates FOR ALL USING (true);
-CREATE POLICY "Full Access" ON voter_tokens FOR ALL USING (true);
-CREATE POLICY "Full Access" ON system_config FOR ALL USING (true);
+-- Unified Full Access Policies for Prototype
+CREATE POLICY "Full access" ON classes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full access" ON positions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full access" ON candidates FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full access" ON voter_tokens FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Full access" ON system_config FOR ALL USING (true) WITH CHECK (true);
