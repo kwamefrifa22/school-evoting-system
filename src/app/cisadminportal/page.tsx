@@ -72,11 +72,16 @@ export default function AdminPage() {
       const { error } = await supabase.auth.signInWithOtp({
         email: emailInput.toLowerCase(),
         options: {
-          shouldCreateUser: false, // Ensure only existing users or pre-invited can login
+          shouldCreateUser: false, // Security: Admin must already exist in Supabase Users list
         }
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.message.includes('Signups not allowed')) {
+          throw new Error('This email is not registered. Please add it to the Supabase Auth "Users" list manually.');
+        }
+        throw error;
+      }
 
       console.log("SUCCESS: Identity verified. Real OTP code requested via Supabase for:", ADMIN_EMAIL);
       setAuthStep('code');
@@ -190,10 +195,15 @@ export default function AdminPage() {
   const toggleElection = async () => {
     const newStatus = !config?.is_open;
     const openedAt = newStatus ? new Date().toISOString() : null;
-    await supabase.from('system_config').update({ 
+    const { error } = await supabase.from('system_config').update({ 
       is_open: newStatus, 
       opened_at: openedAt 
     }).eq('id', 'election_status');
+    
+    if (error) {
+      console.error("Toggle error:", error);
+      toast({ title: "Operation Failed", description: error.message, variant: "destructive" });
+    }
     fetchData();
   };
 
